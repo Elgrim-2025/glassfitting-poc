@@ -61,14 +61,15 @@ describe('rim probes', () => {
     const right = pts.filter((p) => p[0] > 0), left = pts.filter((p) => p[0] < 0);
     expect(right.length).toBe(24);
     expect(left.length).toBe(24);
+    // The outline is the lens box grown by the rim width (default 4 mm) so the inner rim face is covered.
     const cx = 18 / 2 + 52 / 2;
     for (const p of right) {
-      expect(Math.abs(p[0] - cx)).toBeLessThanOrEqual(26 + 1e-6);
-      expect(Math.abs(p[1] - (ANCHOR[1] - 3))).toBeLessThanOrEqual(20 + 1e-6);
+      expect(Math.abs(p[0] - cx)).toBeLessThanOrEqual(30 + 1e-6);
+      expect(Math.abs(p[1] - (ANCHOR[1] - 3))).toBeLessThanOrEqual(24 + 1e-6);
       expect(p[2]).toBeCloseTo(ANCHOR[2] + 3 - 4, 6);
     }
-    expect(Math.min(...right.map((p) => p[0]))).toBeCloseTo(9, 6);
-    expect(Math.max(...right.map((p) => p[0]))).toBeCloseTo(61, 6);
+    expect(Math.min(...right.map((p) => p[0]))).toBeCloseTo(5, 6);
+    expect(Math.max(...right.map((p) => p[0]))).toBeCloseTo(65, 6);
     // Positive tilt lifts the top probes toward +Z and pushes the bottom ones back.
     const tilted = rimProbes(SPEC_138, ASSET_138, ANCHOR, { uniform: 1, width: 1 }, 8);
     const top = tilted.reduce((a, b) => (b[1] > a[1] ? b : a));
@@ -77,7 +78,7 @@ describe('rim probes', () => {
     expect(bottom[2]).toBeLessThan(ANCHOR[2] - 1);
     // Width scale stretches X only.
     const wide = rimProbes(SPEC_138, ASSET_138, ANCHOR, { uniform: 1, width: 1.2 }, 0);
-    expect(Math.max(...wide.map((p) => p[0]))).toBeCloseTo(61 * 1.2, 6);
+    expect(Math.max(...wide.map((p) => p[0]))).toBeCloseTo(65 * 1.2, 6);
   });
 });
 
@@ -112,19 +113,18 @@ describe('solveClearance — forward push', () => {
   // Frame raised to the top of the ridge with a shallow metal rim so the canonical face is clear
   // everywhere and the rim top sits just in front of the brow.
   const highAnchor: [number, number, number] = [0, 32, 53.5];
-  const metal: AssetAnchor = { ...ASSET_138, lens_plane_mm: 5, rim_depth_mm: 2.2 };
-  it('is 0 for the canonical face and > 0 when the brow moves 6 mm forward', () => {
+  const metal: AssetAnchor = { ...ASSET_138, lens_plane_mm: 5, rim_depth_mm: 2.2, rim_width_mm: 1.8 };
+  it('grows when the brow moves 6 mm forward and leaves no residual penetration', () => {
     const base = solve(CANONICAL_VERTICES_MM, { anchorLocal: highAnchor, asset: metal });
-    expect(base.forwardMm).toBe(0);
     expect(base.penetration.brow).toBeLessThan(0);
     const heavy = solve(deformCanonical({ brow: 6 }), { anchorLocal: highAnchor, asset: metal });
-    expect(heavy.forwardMm).toBeGreaterThan(0);
+    expect(heavy.forwardMm).toBeGreaterThan(base.forwardMm);
     expect(heavy.forwardMm).toBeLessThanOrEqual(CFG.maxForwardMm);
     for (const v of Object.values(heavy.penetration)) expect(v).toBeLessThanOrEqual(0);
   });
   it('pushes the frame forward when a nose pad would sink deeper than padSinkMm', () => {
-    // Pads 12 mm behind the bridge origin dig into the nose sides (the surface is ≈5 mm behind the pad at −2).
-    const deepPads: AssetAnchor = { ...ASSET_138, nose_pad_offset: [0, -4, -12] };
+    // Pads 20 mm behind the bridge origin dig into the nose sides further than the rims do.
+    const deepPads: AssetAnchor = { ...ASSET_138, nose_pad_offset: [0, -4, -20] };
     const r = solve(CANONICAL_VERTICES_MM, { asset: deepPads });
     const base = solve(CANONICAL_VERTICES_MM);
     expect(r.forwardMm).toBeGreaterThan(base.forwardMm);

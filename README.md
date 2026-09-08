@@ -6,12 +6,16 @@ MediaPipe Face Landmarker + Three.js로 구현한 브라우저 가상 피팅 검
 
 ```bash
 npm install          # postinstall: MediaPipe WASM, Draco 디코더를 public/으로 복사
-npm run setup        # 모델(.task, 정규 얼굴 OBJ) 다운로드 → canonical.ts 생성 → 샘플 GLB 3종 + mock API 생성
+npm run setup        # 모델(.task, 정규 얼굴 OBJ) 다운로드 → canonical.ts 생성 → 샘플 GLB 3종 + 머리 오클루더 + mock API 생성 (Blender 있으면 Blender 모델링, 없으면 절차적 폴백)
 npm run dev          # http://localhost:5173 (카메라는 localhost 또는 HTTPS에서만 동작)
 npm test             # 코어 단위 테스트 + 골든 벡터 + 에셋 검수 (vitest)
 npm run typecheck
 npm run build        # dist/ 정적 배포물 (HTTPS 호스팅)
+npm run bench:fit    # 얼굴 변형 14종 × 포즈 5종 × 프레임 3종 피팅 벤치 → bench/fit-bench.json
+/Applications/Blender.app/Contents/MacOS/Blender -b --python scripts/blender/fit_bench.py -- --bench bench/fit-bench.json   # Blender 실메시 관통 판정 + 렌더(bench/renders)
 ```
+
+샘플 안경 3종과 머리 오클루더는 Blender(5.x)로 생성한다(`scripts/blender/`, 규격은 [docs/assets/glb-spec.md](docs/assets/glb-spec.md)). Blender가 없으면 `NO_BLENDER=1 npm run setup:frames`로 절차적 폴백을 만든다(외관 평가용 아님).
 
 모바일 실기기 테스트는 HTTPS가 필요하다. 로컬 인증서(mkcert 등)를 만든 뒤 `vite.config.ts`의 `server.https`에 지정하거나, 빌드 결과를 HTTPS 정적 호스팅에 올린다. iOS Safari는 사용자 탭으로만 카메라를 시작한다(화면의 "카메라 시작" 버튼).
 
@@ -23,7 +27,7 @@ npm run build        # dist/ 정적 배포물 (HTTPS 호스팅)
 src/core/            공용 코어(순수 TS, DOM/Three 의존 없음) — 안드로이드 Kotlin 이식 대상
   fittingCore.ts       FittingCore.process(FrameInput) → FitOutput
   fitting/             camera(63° 핀홀), mediapipeMatrix(cm→mm), metricLandmarks(역투영), scaleSolver, noseLanding,
-                       templeSplay, anchorSolver, kabschPose(대안 경로), canonical(생성 데이터)
+                       clearance(다리 벌림·전방 보정·관통 잔여), anchorSolver(틸트 포함), kabschPose(대안 경로), canonical(생성 데이터)
   filters/             One-Euro(scalar/vec3/quat), PoseFilter(T·Q·S 분해)
   tracking/            angles(yaw/pitch/roll), stateMachine(Tracking/Degraded/Lost)
   pd/                  PdEstimator(홍채 스케일·게이팅·통계·근용→원용)
@@ -31,12 +35,14 @@ src/core/            공용 코어(순수 TS, DOM/Three 의존 없음) — 안�
   golden.ts            골든 벡터 생성·검증
 src/platform/        웹 플랫폼 계층
   camera.ts, tracker.ts(FaceLandmarker 래퍼·프로파일 벤치마크), frameLoop.ts(requestVideoFrameCallback)
-  render/              scene(카메라 정합), faceOccluder(깊이 전용 468점 메시), headOccluder(타원체), glasses(GLB 리그·검수), proceduralGlasses
+  render/              scene(카메라 정합), faceOccluder(깊이 전용 468점 메시), headOccluder(Blender 두개골+귀 프록시, 다리 폭에 맞춰 스케일), glasses(GLB 리그·검수), proceduralGlasses
   hud/                 overlay(랜드마크·앵커·카드 측정), panel(계기·튜닝·PD·녹화·내보내기)
   session/recorder.ts  녹화·재생(rAF 타임스탬프 구동)·CSV/골든 내보내기
   product/adapter.ts   제품 마스터 API 클라이언트(mock: public/api/v1)
-scripts/             canonical-to-ts, gen-frames(GLB 3종 + mock API), fetch-models, copy-wasm
-tests/               vitest (core 단위, 골든, 에셋), helpers/synthetic.ts(합성 얼굴 생성기)
+scripts/             canonical-to-ts, gen-frames(Blender 실행·GLB 검수·mock API), fit-bench(얼굴 변형 벤치), fetch-models, copy-wasm
+  frames.json          제품 정의(스펙·형상 파라미터) — GLB·mock API·벤치의 단일 출처
+  blender/             frame_builder(안경 모델링), head_builder(머리 오클루더), fit_bench(실메시 관통 판정·렌더)
+tests/               vitest (core 단위, 골든, 에셋, 클리어런스 회귀), helpers/synthetic.ts(합성 얼굴), helpers/faceVariants.ts(얼굴 변형 14종)
 docs/                api/openapi.yaml, assets/glb-spec.md, core-interface.md(TS↔Kotlin), superpowers/specs·plans
 ```
 
@@ -53,7 +59,7 @@ docs/                api/openapi.yaml, assets/glb-spec.md, core-interface.md(TS�
 |---|---|
 | ① 브릿지 착지·힌지 오차 | 실착용 사진(정면·yaw 30°)과 같은 포즈에서 스크린샷, 오버레이 비교. mm 환산은 PD 거리(`pd.distance_mm`)와 홍채 px 스케일 사용. 앵커 오버레이(빨간 십자)가 브릿지 원점 |
 | ① 프레임 폭 비율 | 실치수 모드에서 HUD `폭 스케일/균일 스케일`, 에셋 검수 폭과 얼굴 폭(관자놀이 마젠타 점) 비교 |
-| ① 코 관통·부유, 오클루전 오류 | "오클루더 표시(디버그)"로 얼굴 메시·머리 타원체 확인, 정면/yaw ±30° 육안 판정. 브릿지 클리어런스 슬라이더로 튜닝 |
+| ① 코 관통·부유, 오클루전 오류 | HUD `관통 잔여 (mm) 다리/눈썹/볼/코`(보정 후 남은 관통, 모두 ≤ 0이면 OK)와 `전방 보정 (mm)`. "오클루더 표시(디버그)"로 얼굴 메시·머리 프록시 확인, 정면/yaw ±30° 육안 판정(먼 쪽 다리가 실루엣 밖에 보이면 안 됨). 브릿지 클리어런스·팬토스코픽 틸트 슬라이더로 튜닝. 오프라인: `npm run bench:fit` + Blender `fit_bench.py`로 얼굴 변형 14종 관통 판정 |
 | ② 정지 지터 | 정지 3초 후 HUD `정지 지터 raw → filtered` (px @720p 환산 / °). "계기 리셋" 후 측정 |
 | ② 모션 지연 | 고개를 좌우로 흔든 뒤 HUD `모션 지연` (raw yaw 대비 filtered yaw 상호상관, ms) |
 | ② 추적 유지율·재획득 | yaw/pitch/roll 스윕 중 `추적 유지율`, 손 가림 해제 후 `재획득 ms` |
@@ -70,7 +76,9 @@ docs/                api/openapi.yaml, assets/glb-spec.md, core-interface.md(TS�
 - 카드 기준 스케일은 OpenCV.js 자동 검출 대신 드래그 수동 측정으로 축소 구현(본 개발에서 자동화).
 - MediaPipe Tasks JS는 얼굴 단위 confidence를 주지 않아 관자놀이 폭 px·행렬 타당성으로 근사한다.
 - Web Worker 검출 분리는 인터페이스만 고려(`FaceTracker.detect`가 순수 함수 형태)하고 메인 스레드로 구현.
-- 다리 벌림(temple splay) 솔버를 추가했다. 정규 모델 관자놀이 폭(155 mm)이 프레임 폭(138 mm)보다 넓어 다리가 머리를 관통하지 않으려면 힌지 회전이 필요하다.
+- 다리 벌림(temple splay) 솔버를 추가했다. 정규 모델 관자놀이 폭(155 mm)이 프레임 폭(138 mm)보다 넓어 다리가 머리를 관통하지 않으려면 힌지 회전이 필요하다. 실착용 테스트 후 옆면 랜드마크 띠 전체(다리 높이 ±15 mm)를 보는 클리어런스 솔버로 확장했고, 림·코 패드의 눈썹·볼·코 관통은 전방 보정으로 해소한다(설계: `docs/superpowers/specs/2026-09-08-glasses-quality-and-clearance-design.md`).
+- 샘플 안경은 절차적 튜브 대신 Blender 파라메트릭 모델(납작한 림·엔드피스·귀 뒤로 굽는 다리·코 패드)로 바꿨고, 머리 오클루더는 타원체 대신 두개골+귀 프록시 메시를 쓴다. 팬토스코픽 틸트 8°를 기본 적용한다(다리는 수평 유지).
+- 메트릭 얼굴 깊이는 기본이 정규 모델 깊이다. 정규 모델의 코는 실제(특히 동아시아형)보다 높아 아세테이트 프레임이 ~10 mm 앞으로 밀리므로, 실기기에서는 HUD `깊이: 랜드마크 z 사용`을 켜서 비교한다(개인 코 깊이 반영, 포즈 변화에 따른 전방 보정 변동도 작아짐). 검증 결과: `docs/verification/2026-09-08-fit-bench.md`.
 
 ## Go/No-Go 기록 양식
 

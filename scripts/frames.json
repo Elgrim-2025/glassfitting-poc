@@ -1,5 +1,5 @@
 {
-  "$comment": "Product definitions (spec §부록 B) — single source for scripts/gen-frames.mjs (mock API, fallback geometry) and scripts/blender/frame_builder.py (GLB modelling). Dimensions in mm, glTF axes (+Y up, +Z toward camera, origin = bridge nose contact). `build` holds modelling parameters that also go to assets.anchor as clearance metadata.",
+  "$comment": "Product definitions (spec §부록 B) — single source for scripts/gen-frames.mjs (mock API, fallback geometry) and scripts/blender/frame_builder.py (GLB modelling). Dimensions in mm, glTF axes (+Y up, +Z toward camera, origin = bridge nose contact). `build` holds modelling parameters that also go to assets.anchor as clearance metadata. The origin is the nose-pad contact face (pad_center.z − pad thickness/2 = 0); the lens plane sits lens_plane_mm in front of it.",
   "frames": [
     {
       "frame_id": "FR-0001",
@@ -10,12 +10,12 @@
       "color": [0.06, 0.05, 0.05], "metallic": 0.0, "roughness": 0.3,
       "lens_tint": [0.85, 0.9, 1.0], "lens_alpha": 0.15,
       "build": {
-        "lens_plane_mm": 3, "rim_width_mm": 4.5, "rim_depth_mm": 4.0, "rim_bevel_mm": 0.8,
+        "lens_plane_mm": 7, "rim_width_mm": 4.5, "rim_depth_mm": 4.0, "rim_bevel_mm": 0.8,
         "lens_center_y_mm": -3, "bridge_height_ratio": 0.3, "bridge_arch_mm": 2.5,
-        "hinge_y_mm": 13, "hinge_z_mm": 2, "hinge_inset_mm": 1.5, "endpiece_mm": 6,
+        "hinge_y_mm": 13, "hinge_z_mm": 6, "hinge_inset_mm": 1.5, "endpiece_mm": 6,
         "temple_bend_mm": 95, "temple_drop_mm": 28, "temple_hook_mm": 2,
         "temple_section_mm": [4.0, 2.5], "temple_tip_section_mm": [3.0, 2.0],
-        "pad_center": [8, -4, -2], "pad_size_mm": [8, 5, 2]
+        "pad_center": [8, -4, 2], "pad_size_mm": [8, 6, 4]
       },
       "fit_hints": { "recommended_pd_range_mm": [58, 68], "shape": "square" }
     },
@@ -28,12 +28,12 @@
       "color": [0.83, 0.69, 0.22], "metallic": 0.9, "roughness": 0.3,
       "lens_tint": [0.85, 0.9, 1.0], "lens_alpha": 0.15,
       "build": {
-        "lens_plane_mm": 5, "rim_width_mm": 1.8, "rim_depth_mm": 2.2, "rim_bevel_mm": 0.5,
+        "lens_plane_mm": 7, "rim_width_mm": 1.8, "rim_depth_mm": 2.2, "rim_bevel_mm": 0.5,
         "lens_center_y_mm": -3, "bridge_height_ratio": 0.3, "bridge_arch_mm": 2.5,
-        "hinge_y_mm": 13, "hinge_z_mm": 3, "hinge_inset_mm": 1.2, "endpiece_mm": 5,
+        "hinge_y_mm": 13, "hinge_z_mm": 5, "hinge_inset_mm": 1.2, "endpiece_mm": 5,
         "temple_bend_mm": 99, "temple_drop_mm": 28, "temple_hook_mm": 2,
         "temple_section_mm": [1.8, 1.8], "temple_tip_section_mm": [3.5, 3.0],
-        "pad_center": [11.5, -4, -3], "pad_size_mm": [8, 14, 1.5], "pad_tilt_deg": 20
+        "pad_center": [9.5, -4, 0.75], "pad_size_mm": [8, 14, 1.5], "pad_tilt_deg": 20
       },
       "fit_hints": { "recommended_pd_range_mm": [56, 66], "shape": "round" }
     },
@@ -46,12 +46,12 @@
       "color": [0.75, 0.75, 0.78], "metallic": 0.95, "roughness": 0.25,
       "lens_tint": [0.6, 0.7, 0.75], "lens_alpha": 0.25,
       "build": {
-        "lens_plane_mm": 5, "rim_width_mm": 1.8, "rim_depth_mm": 2.2, "rim_bevel_mm": 0.5,
+        "lens_plane_mm": 7, "rim_width_mm": 1.8, "rim_depth_mm": 2.2, "rim_bevel_mm": 0.5,
         "lens_center_y_mm": -3, "bridge_height_ratio": 0.3, "bridge_arch_mm": 2.5, "double_bridge_mm": 6,
-        "hinge_y_mm": 13, "hinge_z_mm": 3, "hinge_inset_mm": 1.2, "endpiece_mm": 5,
+        "hinge_y_mm": 13, "hinge_z_mm": 5, "hinge_inset_mm": 1.2, "endpiece_mm": 5,
         "temple_bend_mm": 95, "temple_drop_mm": 28, "temple_hook_mm": 2,
         "temple_section_mm": [1.8, 1.8], "temple_tip_section_mm": [3.5, 3.0],
-        "pad_center": [8, -4, -3], "pad_size_mm": [8, 14, 1.5], "pad_tilt_deg": 20
+        "pad_center": [8, -4, 0.75], "pad_size_mm": [8, 14, 1.5], "pad_tilt_deg": 20
       },
       "fit_hints": { "recommended_pd_range_mm": [60, 70], "shape": "aviator" }
     }

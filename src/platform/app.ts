@@ -32,7 +32,7 @@ export class App {
   private startBtn: HTMLButtonElement;
 
   private core = new FittingCore();
-  private renderer: SceneRenderer;
+  readonly renderer: SceneRenderer;
   private overlay: LandmarkOverlay;
   private panel!: Panel;
   private camera: CameraSource;
@@ -57,7 +57,7 @@ export class App {
   private renderOpts: RenderOptions = { faceOccluder: true, headOccluder: true, debugOccluder: false };
   private overlayOpts: OverlayOptions = { landmarks: false, anchors: true };
   private lastFrame: FrameInput | null = null;
-  private lastOut: FitOutput | null = null;
+  lastOut: FitOutput | null = null;
   private lastPanelMs = 0;
   private busy = false;
 
@@ -93,6 +93,17 @@ export class App {
     }
     this.renderer.render(null, this.renderOpts);
     this.panel.setMessage('카메라를 시작하거나 데모 시퀀스를 로드하세요.');
+    // QA: ?replay=<url> loads a recorded/synthetic session (e.g. /bench/replays/wide_flat-yaw30.json) at start-up.
+    const replayUrl = new URLSearchParams(location.search).get('replay');
+    if (replayUrl) {
+      try {
+        const res = await fetch(replayUrl);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        this.loadReplay((await res.json()) as GoldenVector);
+      } catch (err) {
+        this.panel.setMessage(`replay 로드 실패 (${replayUrl}): ${err instanceof Error ? err.message : err}`, 'bad');
+      }
+    }
   }
 
   // ---- stage sizing --------------------------------------------------------

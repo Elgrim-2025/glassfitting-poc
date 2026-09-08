@@ -129,6 +129,7 @@ export function buildFrameGeometry(def) {
       nose_pad_offset: [0, padY, padZ],
       lens_plane_mm: frontZ,
       rim_depth_mm: RIM_RADIUS * 2,
+      rim_width_mm: RIM_RADIUS * 2,
       temple_bend_mm: bend,
       temple_drop_mm: drop,
     },

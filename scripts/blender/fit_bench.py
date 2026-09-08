@@ -6,8 +6,14 @@ GLB with the matrix the fitting core produced, applies the temple splay, and mea
 minimum signed distance of each part to the face surface with a BVH. Also renders a front
 and a yaw-30° view per variant into bench/renders/.
 
-Pass criteria (mm, negative = inside the skin):
+Two face meshes are judged per case:
+  metric — the core's occluder mesh (screen-exact xy, canonical depth): what the renderer
+           hides behind; a part inside it disappears on screen. This is the pass criterion.
+  true   — the deformed face geometry: how far the fit is from physical contact (reported,
+           not a pass criterion — the runtime never sees the true depth).
+Pass criteria on the metric mesh (mm, negative = inside the skin):
   temples ≥ −0.5   rims (frame_front) ≥ −0.5   lenses ≥ 0   nose pads ≥ −1.5 (pads press the skin)
+Temple vertices behind the ear landmarks (z < −25) are not judged: the face shell ends there.
 
 Usage (headless):
   Blender -b --python scripts/blender/fit_bench.py -- --bench bench/fit-bench.json [--renders bench/renders] [--frame FR-0001] [--no-render]
@@ -24,7 +30,7 @@ from mathutils import Euler, Matrix, Vector
 
 TOLERANCE = {'temple_L': -0.5, 'temple_R': -0.5, 'frame_front': -0.5, 'lens_L': 0.0, 'lens_R': 0.0, 'nose_pads': -1.5}
 # Only vertices in front of the face-mesh boundary can be judged against an open face shell.
-JUDGE_MIN_Z = -28.0
+JUDGE_MIN_Z = -25.0
 
 
 def G(x, y, z):
@@ -89,27 +95,49 @@ def hierarchy(root):
     return out
 
 
-def place(root, objs, glasses_local, splay):
-    root.matrix_world = gltf_matrix_to_blender(glasses_local)
+def place(root, objs, glasses_local, splay, tilt_rad=0.0):
+    """Same rig maths as glasses.ts: temples = T(h)·Rx(−tilt)·Ry(±splay)·T(−h) (glTF axes → Blender X/Z).
+
+    The assignment is done twice: on a freshly imported hierarchy the first root
+    matrix_world assignment is not reflected in the children's world matrices until the
+    depsgraph has evaluated once (observed in Blender 5.2), so a single pass places the
+    temples wrongly for the first case.
+    """
     by = {o.name.split('.')[0]: o for o in objs}
-    for name, sign, ang in (('temple_L', -1, splay[0]), ('temple_R', 1, splay[1])):
-        t = by[name]
-        h = by['anchor_temple_' + name[-1]].matrix_local.translation
-        rot = Matrix.Translation(h) @ Matrix.Rotation(ang if sign < 0 else -ang, 4, 'Z') @ Matrix.Translation(-h)
-        t.matrix_parent_inverse = Matrix.Identity(4)
-        t.matrix_basis = rot
-    bpy.context.view_layer.update()
+    for _ in range(2):
+        root.matrix_world = gltf_matrix_to_blender(glasses_local)
+        for name, sign, ang in (('temple_L', -1, splay[0]), ('temple_R', 1, splay[1])):
+            t = by[name]
+            h = by['anchor_temple_' + name[-1]].matrix_local.translation
+            rot = (Matrix.Translation(h) @ Matrix.Rotation(-tilt_rad, 4, 'X')
+                   @ Matrix.Rotation(ang if sign < 0 else -ang, 4, 'Z') @ Matrix.Translation(-h))
+            t.matrix_parent_inverse = Matrix.Identity(4)
+            t.matrix_basis = rot
+        bpy.context.view_layer.update()
 
 
-def min_signed_distance(part, bvh):
-    m = part.matrix_world
+def boundary_polygons(me):
+    """Indices of polygons touching an open edge of the face shell (signed distances there are meaningless)."""
+    edge_faces = {}
+    for p in me.polygons:
+        for e in p.edge_keys:
+            edge_faces.setdefault(e, []).append(p.index)
+    out = set()
+    for e, faces in edge_faces.items():
+        if len(faces) == 1:
+            out.add(faces[0])
+    return out
+
+
+def min_signed_distance(part, bvh, boundary=frozenset()):
+    m = part.evaluated_get(bpy.context.evaluated_depsgraph_get()).matrix_world
     worst, where = float('inf'), None
     for v in part.data.vertices:
         p = m @ v.co
         if -p.y < JUDGE_MIN_Z:  # behind the face shell: not judged
             continue
-        loc, nrm, idx, dist = bvh.find_nearest(p, 60.0)
-        if loc is None:
+        loc, nrm, idx, dist = bvh.find_nearest(p, 40.0)
+        if loc is None or idx in boundary:
             continue
         sd = (p - loc).dot(nrm)
         if sd < worst:
@@ -174,7 +202,8 @@ def run_bench(bench_path, renders_dir=None, only_frame=None, render=True, verbos
     for variant in bench['variants']:
         face = make_face(f"face_{variant['name']}", variant['vertices'], tris, skin)
         dg = bpy.context.evaluated_depsgraph_get()
-        bvh = mathutils.bvhtree.BVHTree.FromObject(face, dg)
+        bvh_true = mathutils.bvhtree.BVHTree.FromObject(face, dg)
+        boundary = frozenset(boundary_polygons(face.data))
         for case in variant['cases']:
             fid = case['frame_id']
             if fid not in loaded:
@@ -182,20 +211,26 @@ def run_bench(bench_path, renders_dir=None, only_frame=None, render=True, verbos
             root, objs = loaded[fid]
             for o in objs:
                 o.hide_render = False
-            place(root, objs, case['glassesLocal'], case['splay'])
-            parts = {}
+            place(root, objs, case['glassesLocal'], case['splay'], case.get('tiltRad', 0.0))
+            metric = make_face(f"metric_{variant['name']}", case['metricLocal'], tris, skin)
+            metric.hide_render = True
+            bvh_metric = mathutils.bvhtree.BVHTree.FromObject(metric, bpy.context.evaluated_depsgraph_get())
+            parts, parts_true = {}, {}
             ok = True
             for o in objs:
                 base = o.name.split('.')[0]
                 if o.type != 'MESH' or base not in TOLERANCE:
                     continue
-                sd, where = min_signed_distance(o, bvh)
+                sd, where = min_signed_distance(o, bvh_metric, boundary)
+                sd_true, _ = min_signed_distance(o, bvh_true, boundary)
                 parts[base] = None if sd is None else round(sd, 2)
+                parts_true[base] = None if sd_true is None else round(sd_true, 2)
                 if sd is not None and sd < TOLERANCE[base]:
                     ok = False
                     if verbose:
-                        print(f"  FAIL {variant['name']} {case['pose']} {fid} {base}: {sd:.2f} mm at {where}")
-            res = {'variant': variant['name'], 'pose': case['pose'], 'frame_id': fid, 'ok': ok, 'parts': parts,
+                        print(f"  FAIL {variant['name']} {case['pose']} {fid} {base}: {sd:.2f} mm (metric) at {where}; true {parts_true[base]}")
+            bpy.data.objects.remove(metric, do_unlink=True)
+            res = {'variant': variant['name'], 'pose': case['pose'], 'frame_id': fid, 'ok': ok, 'parts': parts, 'partsTrue': parts_true,
                    'forwardMm': case.get('forwardMm'), 'splayDeg': [round(math.degrees(s), 1) for s in case['splay']],
                    'corePenetration': case.get('penetration')}
             results.append(res)
@@ -210,15 +245,19 @@ def run_bench(bench_path, renders_dir=None, only_frame=None, render=True, verbos
     print(f"[fit_bench] cases {len(results)}, failed {len(fails)}")
     for r in fails:
         print(f"  {r['variant']:16s} {r['pose']} {r['frame_id']} parts={r['parts']}")
-    worst = {}
+    worst, worst_true = {}, {}
     for r in results:
         for k, v in r['parts'].items():
             if v is not None and (k not in worst or v < worst[k]):
                 worst[k] = v
-    print('[fit_bench] worst signed distance per part (mm):', worst)
+        for k, v in r['partsTrue'].items():
+            if v is not None and (k not in worst_true or v < worst_true[k]):
+                worst_true[k] = v
+    print('[fit_bench] worst signed distance per part vs metric mesh (mm):', worst)
+    print('[fit_bench] worst signed distance per part vs true face (mm, info):', worst_true)
     out_path = os.path.join(os.path.dirname(os.path.abspath(bench_path)), 'fit-bench-blender.json')
     with open(out_path, 'w') as f:
-        json.dump({'results': results, 'worst': worst, 'tolerance': TOLERANCE}, f, indent=1)
+        json.dump({'results': results, 'worst': worst, 'worstTrue': worst_true, 'tolerance': TOLERANCE}, f, indent=1)
     print('[fit_bench] wrote', out_path)
     return results
 
@@ -242,7 +281,9 @@ def main():
     bpy.ops.object.delete(use_global=False)
     results = run_bench(bench, renders or os.path.join(os.path.dirname(os.path.abspath(bench)), 'renders'), frame, render, verbose=True)
     if any(not r['ok'] for r in results):
-        raise SystemExit('fit bench failed')
+        print('[fit_bench] FAILED')
+        sys.exit(1)
+    print('[fit_bench] PASSED')
 
 
 if not globals().get('FIT_BENCH_NO_MAIN'):

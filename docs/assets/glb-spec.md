@@ -47,6 +47,7 @@ L/R은 **모델 공간의 −X/+X** 라벨이다(랜드마크 127 = TEMPLE_L = �
 | `nose_pad_offset` | 필수 | 코 패드 중심의 y·z (x는 0) | — |
 | `lens_plane_mm` | 선택 | 렌즈 평면 z | 4 |
 | `rim_depth_mm` | 선택 | 렌즈 평면에서 림 뒷면까지 깊이 | 4 |
+| `rim_width_mm` | 선택 | 렌즈 가장자리에서 림 바깥면까지 폭(안쪽 림이 코 쪽으로 닿는 범위) | 4 |
 | `temple_bend_mm` | 선택 | 힌지에서 귀 굽힘 시작까지 길이 | 0.68 × temple_mm |
 | `temple_drop_mm` | 선택 | 굽힘 이후 다리 끝까지 내려가는 높이 | 28 |
 

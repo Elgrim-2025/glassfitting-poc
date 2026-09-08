@@ -21,20 +21,21 @@
       "temple_left": [
         -67.5,
         13,
-        2
+        6
       ],
       "temple_right": [
         67.5,
         13,
-        2
+        6
       ],
       "nose_pad_offset": [
         0,
         -4,
-        -2
+        0
       ],
-      "lens_plane_mm": 3,
+      "lens_plane_mm": 7,
       "rim_depth_mm": 4,
+      "rim_width_mm": 4.5,
       "temple_bend_mm": 95,
       "temple_drop_mm": 28
     }

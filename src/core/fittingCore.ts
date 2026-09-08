@@ -4,7 +4,7 @@
  */
 import { DEFAULT_CONFIG, mergeConfig, type FittingConfigPatch } from './config';
 import { PoseFilter } from './filters/poseFilter';
-import { OneEuroScalar } from './filters/oneEuro';
+import { OneEuroScalar, OneEuroVec3 } from './filters/oneEuro';
 import { CameraModel } from './fitting/camera';
 import { composeGlassesMatrix } from './fitting/anchorSolver';
 import { estimatePoseKabsch } from './fitting/kabschPose';
@@ -30,6 +30,9 @@ export class FittingCore {
   private sm: TrackingStateMachine;
   private pd: PdEstimator;
   private widthFilter = new OneEuroScalar({ minCutoff: 0.3, beta: 0, dCutoff: 1 });
+  /** Nose-landing anchor (face-local) and clearance push are per-frame solves on raw landmarks: smooth them. */
+  private anchorFilter = new OneEuroVec3({ minCutoff: 1.0, beta: 0.02, dCutoff: 1 });
+  private pushFilter = new OneEuroScalar({ minCutoff: 0.5, beta: 0, dCutoff: 1 });
   private splayL = new OneEuroScalar({ minCutoff: 0.5, beta: 0, dCutoff: 1 });
   private splayR = new OneEuroScalar({ minCutoff: 0.5, beta: 0, dCutoff: 1 });
   private cam: CameraModel | null = null;
@@ -71,6 +74,8 @@ export class FittingCore {
     this.sm.reset();
     this.pd.reset();
     this.widthFilter.reset();
+    this.anchorFilter.reset();
+    this.pushFilter.reset();
     this.splayL.reset();
     this.splayR.reset();
     this.last = null;
@@ -118,7 +123,7 @@ export class FittingCore {
         rawFace = estimatePoseKabsch(pts).matrix;
         plausible = isPlausibleFaceMatrix(rawFace);
       }
-      metric = toMetricLandmarks(lm, rawFace!, cam, 'matrix', this.metricBuf);
+      metric = toMetricLandmarks(lm, rawFace!, cam, cfg.placement.depthSource === 'landmark' ? 'landmark' : 'matrix', this.metricBuf);
       angles = anglesFromMatrix(rawFace!);
       const faceWidthPx = Math.hypot(
         (lm[LM.TEMPLE_L].x - lm[LM.TEMPLE_R].x) * frame.imageWidth,
@@ -155,8 +160,8 @@ export class FittingCore {
         widthScale = cfg.placement.widthScaleEnabled ? smoothWidth : 1;
       }
 
-      // Nose landing → clearance (forward push on the anchor, unfiltered splay) → matrix with tilt → filtered splay.
-      anchorLocal = solveNoseLanding(metric!, rawFace!, this.spec, cfg.placement).anchor;
+      // Nose landing (filtered) → clearance (forward push on the anchor) → matrix with tilt → filtered splay/push.
+      anchorLocal = this.anchorFilter.filter(solveNoseLanding(metric!, rawFace!, this.spec, cfg.placement).anchor, frame.timestampMs, st.filterStrength);
       const scale = { uniform: uniformScale, width: widthScale };
       const hinge = this.hingeGeometry();
       if (this.spec && hinge) {
@@ -165,7 +170,7 @@ export class FittingCore {
           verticesLocal: local, anchorLocal, spec: this.spec, hinge, asset: this.asset, scale,
           tiltDeg: cfg.placement.pantoscopicTiltDeg, cfg: cfg.placement.clearance,
         });
-        anchorLocal = [anchorLocal[0], anchorLocal[1], anchorLocal[2] + clearance.forwardMm];
+        anchorLocal = [anchorLocal[0], anchorLocal[1], anchorLocal[2] + this.pushFilter.filter(clearance.forwardMm, frame.timestampMs)];
         templeSplay = {
           left: this.splayL.filter(clearance.splay.left, frame.timestampMs),
           right: this.splayR.filter(clearance.splay.right, frame.timestampMs),
@@ -186,6 +191,8 @@ export class FittingCore {
     } else {
       this.poseFilter.reset();
       this.widthFilter.reset();
+      this.anchorFilter.reset();
+      this.pushFilter.reset();
       this.splayL.reset();
       this.splayR.reset();
     }
@@ -211,6 +218,7 @@ export class FittingCore {
       realSizeActive,
       anchorLocal,
       templeSplay,
+      tiltDeg: glassesMatrix ? cfg.placement.pantoscopicTiltDeg : 0,
       clearance,
       bridgeAnchor,
       pd,

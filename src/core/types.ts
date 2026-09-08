@@ -55,6 +55,8 @@ export interface AssetAnchor {
   lens_plane_mm?: number;
   /** Depth from the lens plane to the rim's back face (mm, default 4). */
   rim_depth_mm?: number;
+  /** Rim width from the lens edge outward (mm), default 4; the inner rims reach this far toward the nose. */
+  rim_width_mm?: number;
   /** Straight arm length from the hinge to where the ear bend starts (mm, default 0.68·temple_mm). */
   temple_bend_mm?: number;
   /** Height the arm drops from the bend to its tip (mm, default 28). */
@@ -146,6 +148,8 @@ export interface FittingConfig {
     nosePadDropMm: Record<NosePadType, number>;
     /** Use Kabsch pose estimated from landmarks instead of the MediaPipe matrix. */
     useKabschPose: boolean;
+    /** Depth of the metric face points: the posed canonical model (stable) or MediaPipe's per-landmark z (personal nose/cheek depth). */
+    depthSource: 'canonical' | 'landmark';
     /** Pantoscopic tilt about +X (deg); positive tips the lens top toward the camera. */
     pantoscopicTiltDeg: number;
     clearance: ClearanceConfig;
@@ -190,6 +194,8 @@ export interface FitOutput {
   anchorLocal: Vec3 | null;
   /** Outward temple rotation about each hinge (radians), temporally filtered. */
   templeSplay: { left: number; right: number };
+  /** Pantoscopic tilt applied to the front (deg). Temples stay level: the rig counter-rotates them. */
+  tiltDeg: number;
   /** Clearance solve of this frame (null when no spec is set or the pose is held). */
   clearance: ClearanceResult | null;
   /** Bridge anchor in camera space (mm) and its projection (normalized). */

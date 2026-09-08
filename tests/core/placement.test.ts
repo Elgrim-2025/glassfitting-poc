@@ -52,7 +52,7 @@ describe('solveNoseLanding', () => {
   it('adjustable pads and a wider bridge land lower and on the ridge surface', () => {
     const { face, metric } = setup();
     const r = solveNoseLanding(metric, face, { ...spec, bridge_mm: 20, nose_pad: 'adjustable' }, DEFAULT_CONFIG.placement);
-    expect(r.landingY).toBeCloseTo(yOf(LM.BRIDGE) - 3 - 1.6, 3);
+    expect(r.landingY).toBeCloseTo(yOf(LM.BRIDGE) - 5 - 1.6, 3);
     expect(r.landingY).toBeGreaterThan(yOf(197));
     // Interpolated depth lies between the neighbouring ridge points.
     const lo = Math.min(zOf(LM.BRIDGE), zOf(197)), hi = Math.max(zOf(LM.BRIDGE), zOf(197));

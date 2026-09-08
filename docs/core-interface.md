@@ -41,12 +41,15 @@ interface AssetAnchor {
   bridge: Vec3; temple_left: Vec3; temple_right: Vec3; nose_pad_offset: Vec3;
   lens_plane_mm?: number;   // 렌즈 평면 z (기본 4)
   rim_depth_mm?: number;    // 렌즈 평면에서 림 뒷면까지 (기본 4)
+  rim_width_mm?: number;    // 렌즈 가장자리에서 림 바깥면까지 (기본 4)
   temple_bend_mm?: number;  // 힌지에서 귀 굽힘 시작까지 (기본 0.68·temple_mm)
   temple_drop_mm?: number;  // 굽힘 이후 끝까지 내려가는 높이 (기본 28)
 }
 ```
 
-설정 추가(`config.placement`): `pantoscopicTiltDeg: 8`, `clearance: { templeMm: 2.5, rimMm: 1.5, padSinkMm: 1.0, maxForwardMm: 12, maxSplayDeg: 15 }`.
+설정 추가(`config.placement`): `pantoscopicTiltDeg: 8`, `clearance: { templeMm: 2.5, rimMm: 1.5, padSinkMm: 1.0, maxForwardMm: 15, maxSplayDeg: 15 }`, `depthSource: 'canonical' | 'landmark'`(메트릭 점의 깊이 출처 — 정규 모델 깊이(기본, 안정) 또는 MediaPipe 랜드마크 z(개인 코·볼 깊이 반영, 실기기에서 비교)).
+
+출력 추가(`FitOutput.tiltDeg`): 프런트에 적용한 팬토스코픽 틸트(°). 다리는 수평을 유지해야 하므로 렌더러가 힌지 기준으로 `Rx(−tilt)`를 다리 노드에 곱한다(`glasses.ts applySplay`, Blender 벤치 `fit_bench.py place()` 동일).
 
 ## 2. 처리 순서 (`FittingCore.process`)
 
@@ -61,7 +64,7 @@ interface AssetAnchor {
 9. `solveNoseLanding` — 능선 168→6→197→195→5, 착지 y = y(6) + 코패드 프리셋(fixed 0 / adjustable −3) − 0.8·max(0, bridge − 18), z는 능선 보간 + 클리어런스 1 mm.
 10. `solveClearance` — 메트릭 점을 `inv(rawFace)`로 얼굴 로컬로 옮긴 뒤:
     - 영역 인덱스는 정규 모델에서 기하 조건으로 모듈 로드 시 계산: SIDE_L/R(|x| > 50, y ∈ [−5, 65]), NOSE_L/R(2 < |x| < 22, z > 45, y ∈ [−15, 35]), BROW(|x| < 60, y ∈ [35, 62], z > 40), CHEEK_L/R(18 < |x| < 66, y ∈ [−30, 15], z > 25). L = −X(이미지 왼쪽).
-    - 전방 보정: 렌즈 바운딩 박스의 둥근 사각형(중심 x = ±(bridge/2 + lens_width/2), y = −3, 모서리 반경 0.25·lens_height, 24점/렌즈)을 z = lens_plane − rim_depth에 놓고 T(anchor)·Rx(tilt)·S·T(−bridge)로 옮긴 림 프로브와 코 패드 프로브(x = ±bridge/2, adjustable은 +2; y·z = nose_pad_offset)를 BROW·CHEEK·NOSE 높이장 z(x,y)(xy 최근접 3점 역거리 가중, 최근접이 12 mm 밖이면 해당 영역 없음)와 비교. push = max(z_face − z_probe + margin), margin = rimMm(림) / −padSinkMm(패드), 0 ≤ push ≤ maxForwardMm → 앵커 z에 더함.
+    - 전방 보정: 렌즈 바운딩 박스의 둥근 사각형(중심 x = ±(bridge/2 + lens_width/2), y = −3, 모서리 반경 0.25·lens_height, 24점/렌즈)을 z = lens_plane − rim_depth에 놓고 T(anchor)·Rx(tilt)·S·T(−bridge)로 옮긴 림 프로브(외곽선은 rim_width_mm만큼 바깥으로 키워 코 쪽 안쪽 림 면까지 포함)와 코 패드 프로브(x = ±(bridge/2 − 1), adjustable은 최소 8; y·z = nose_pad_offset)를 BROW·CHEEK·NOSE 높이장 z(x,y)(xy 최근접 3점 역거리 가중, 최근접이 12 mm 밖이면 해당 영역 없음)와 비교. push = max(z_face − z_probe + margin), margin = rimMm(림) / −padSinkMm(패드), 0 ≤ push ≤ maxForwardMm → 앵커 z에 더함.
     - 다리 벌림: 보정된 앵커 기준 힌지(에셋 temple_left/right, 없으면 스펙 추정) 주위로, SIDE 정점 중 다리 높이 창(|p.y − armY(p.z)| ≤ 15 mm, 힌지보다 ≥ 3 mm 뒤)에 대해 tan θ ≥ (sign·(p.x − hingeX) + templeMm)/(hingeZ − p.z), 0 ≤ θ ≤ maxSplayDeg. armY(z)는 힌지 높이를 temple_bend_mm까지 유지하고 이후 temple_drop_mm 만큼 선형 하강하는 3점 폴리라인(틸트 적용 후).
     - penetration은 보정 후, 여유 없이 측정(다리: 정점 − 다리 중심선, 림: z_face − z_rim, 코: max(림, 패드 − padSinkMm)).
 11. `composeGlassesMatrix(face, anchor, scale, asset, pantoscopicTiltDeg)` — face · T(anchor) · Rx(tilt) · S · T(−bridge). 양의 틸트는 렌즈 상단을 +Z(카메라)로 기울인다(다리 끝은 위로).
@@ -83,7 +86,7 @@ interface AssetAnchor {
 | `Float32Array` 메트릭 포인트 | `FloatArray(478*3)` | 오클루더 메시 갱신 |
 | `PdEstimator` | 동일 | 통계 함수(median, quantile, IQR) 동일 구현 |
 | `FittingConfig` | `data class` + 기본값 동일 | `DEFAULT_CONFIG` 참조 |
-| `AssetAnchor` 선택 메타(`lens_plane_mm`, `rim_depth_mm`, `temple_bend_mm`, `temple_drop_mm`) | `Float?` 필드 + `clearance.ts`의 `DEFAULT_*` 기본값 | mock API `assets.anchor`에서 옴 |
+| `AssetAnchor` 선택 메타(`lens_plane_mm`, `rim_depth_mm`, `rim_width_mm`, `temple_bend_mm`, `temple_drop_mm`) | `Float?` 필드 + `clearance.ts`의 `DEFAULT_*` 기본값 | mock API `assets.anchor`에서 옴 |
 | `ClearanceConfig` / `ClearanceResult` | `data class` | `penetration`의 −Infinity는 `Float.NEGATIVE_INFINITY`(JSON null) |
 | `SIDE_L/R, NOSE_L/R, BROW, CHEEK_L/R` (`IntArray`) | 앱 시작 시 같은 기하 조건으로 `CANONICAL_VERTICES_MM`에서 계산 | 인덱스 하드코딩 금지 — 정규 모델 갱신 시 자동 추종 |
 | `solveClearance`, `rimProbes`, `padProbes`, `templeArm`, `heightAt` | 동일 순수 함수 | 프레임당 ~50 프로브 × ~40 정점, 할당 없이 구현 가능 |

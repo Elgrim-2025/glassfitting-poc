@@ -25,9 +25,10 @@ export function anchorFromDef(def) {
     bridge: [0, 0, 0],
     temple_left: [-hx, b.hinge_y_mm, b.hinge_z_mm],
     temple_right: [hx, b.hinge_y_mm, b.hinge_z_mm],
-    nose_pad_offset: [0, b.pad_center[1], b.pad_center[2]],
+    nose_pad_offset: [0, b.pad_center[1], b.pad_center[2] - (b.pad_size_mm ? b.pad_size_mm[2] / 2 : 0)],
     lens_plane_mm: b.lens_plane_mm,
     rim_depth_mm: b.rim_depth_mm,
+    rim_width_mm: b.rim_width_mm,
     temple_bend_mm: b.temple_bend_mm ?? Math.round(tl * 0.68),
     temple_drop_mm: b.temple_drop_mm ?? 28,
   };

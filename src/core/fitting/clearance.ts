@@ -58,6 +58,7 @@ export interface ClearanceInput {
 // ---- asset metadata defaults (spec §4.3) ------------------------------------
 export const DEFAULT_LENS_PLANE_MM = 4;
 export const DEFAULT_RIM_DEPTH_MM = 4;
+export const DEFAULT_RIM_WIDTH_MM = 4;
 export const DEFAULT_TEMPLE_BEND_RATIO = 0.68;
 export const DEFAULT_TEMPLE_DROP_MM = 28;
 export const DEFAULT_NOSE_PAD_OFFSET: Vec3 = [0, -4, -2];
@@ -74,8 +75,12 @@ export const LENS_CENTER_Y_MM = -3;
 export const LENS_CORNER_RATIO = 0.25;
 /** A probe farther than this (xy) from the nearest region vertex is not over that region. */
 export const REGION_REACH_MM = 12;
-/** Extra X offset of adjustable pads beyond bridge/2 (mm). */
-export const ADJUSTABLE_PAD_X_MM = 2;
+/** Adjustable pads sit on arms behind the rims: centre |x| = max(ADJUSTABLE_PAD_MIN_X_MM, bridge/2 − 1). */
+export const ADJUSTABLE_PAD_MIN_X_MM = 8;
+
+/** Nose-pad centre |x| for a spec (fixed pads: bridge/2 − 1; adjustable: see ADJUSTABLE_PAD_MIN_X_MM). */
+export const padHalfSpacing = (spec: FrameSpec): number =>
+  spec.nose_pad === 'adjustable' ? Math.max(ADJUSTABLE_PAD_MIN_X_MM, spec.bridge_mm / 2 - 1) : spec.bridge_mm / 2 - 1;
 
 // ---- regions (computed once from the canonical geometry) -----------------------
 const selectVertices = (pred: (x: number, y: number, z: number) => boolean): number[] => {
@@ -160,27 +165,40 @@ export function roundedRectOutline(cx: number, cy: number, hw: number, hh: numbe
 /**
  * Rim back-face probes in face-local mm: the rounded-rectangle outline of each lens
  * (centre x = ±(bridge/2 + lens_width/2), y = LENS_CENTER_Y_MM, corner radius
- * 0.25·lens_height) at z = lens_plane − rim_depth, then tilted, scaled and anchored.
+ * 0.25·lens_height) grown outward by the rim width — so the rim's inner face next to the
+ * nose is covered — at z = lens_plane − rim_depth, then tilted, scaled and anchored.
  */
 export function rimProbes(spec: FrameSpec, asset: AssetAnchor | null | undefined, anchorLocal: Vec3, scale: GlassesScale, tiltDeg: number): Vec3[] {
   const pl = placementOf(asset, scale, tiltDeg, anchorLocal);
   const zr = (asset?.lens_plane_mm ?? DEFAULT_LENS_PLANE_MM) - (asset?.rim_depth_mm ?? DEFAULT_RIM_DEPTH_MM);
-  const hw = spec.lens_width_mm / 2, hh = spec.lens_height_mm / 2;
-  const cx = spec.bridge_mm / 2 + hw;
+  const rw = asset?.rim_width_mm ?? DEFAULT_RIM_WIDTH_MM;
+  const hw = spec.lens_width_mm / 2 + rw, hh = spec.lens_height_mm / 2 + rw;
+  const cx = spec.bridge_mm / 2 + spec.lens_width_mm / 2;
   const out: Vec3[] = [];
   for (const sign of [-1, 1]) {
-    for (const [x, y] of roundedRectOutline(sign * cx, LENS_CENTER_Y_MM, hw, hh, LENS_CORNER_RATIO * spec.lens_height_mm, RIM_PROBES_PER_LENS)) {
+    for (const [x, y] of roundedRectOutline(sign * cx, LENS_CENTER_Y_MM, hw, hh, LENS_CORNER_RATIO * spec.lens_height_mm + rw, RIM_PROBES_PER_LENS)) {
       out.push(toFaceLocal(pl, [x, y, zr]));
     }
   }
   return out;
 }
 
-/** Nose-pad centre probes in face-local mm (x = ±bridge/2, +2 mm for adjustable pads). */
+/** Bridge-bar probes: 5 points between the lenses at 30 % of the lens height, 1 mm behind the lens plane. */
+export function bridgeProbes(spec: FrameSpec, asset: AssetAnchor | null | undefined, anchorLocal: Vec3, scale: GlassesScale, tiltDeg: number): Vec3[] {
+  const pl = placementOf(asset, scale, tiltDeg, anchorLocal);
+  const y = LENS_CENTER_Y_MM + 0.3 * spec.lens_height_mm;
+  const z = (asset?.lens_plane_mm ?? DEFAULT_LENS_PLANE_MM) - 1;
+  const half = spec.bridge_mm / 2;
+  const out: Vec3[] = [];
+  for (let k = 0; k < 5; k++) out.push(toFaceLocal(pl, [-half + (2 * half * k) / 4, y, z]));
+  return out;
+}
+
+/** Nose-pad centre probes in face-local mm (x = ±padHalfSpacing). */
 export function padProbes(spec: FrameSpec, asset: AssetAnchor | null | undefined, anchorLocal: Vec3, scale: GlassesScale, tiltDeg: number): Vec3[] {
   const pl = placementOf(asset, scale, tiltDeg, anchorLocal);
   const off = asset?.nose_pad_offset ?? DEFAULT_NOSE_PAD_OFFSET;
-  const px = spec.bridge_mm / 2 + (spec.nose_pad === 'adjustable' ? ADJUSTABLE_PAD_X_MM : 0);
+  const px = padHalfSpacing(spec);
   return [toFaceLocal(pl, [-px, off[1], off[2]]), toFaceLocal(pl, [px, off[1], off[2]])];
 }
 
@@ -188,18 +206,19 @@ export function padProbes(spec: FrameSpec, asset: AssetAnchor | null | undefined
  * Temple arm centreline (splay 0) as a 3-point polyline in face-local mm: hinge,
  * bend start, tip. The arm keeps the hinge height until temple_bend_mm and then drops
  * temple_drop_mm linearly to the tip.
+ *
+ * The pantoscopic tilt only moves the hinge: the arms themselves stay level along −Z
+ * (the tilt is the angle between the front and the temples, as on a real frame). The
+ * renderer counter-rotates the temple nodes by −tilt about the hinge to match.
  */
 export function templeArm(sign: -1 | 1, spec: FrameSpec, hinge: HingeGeometry, asset: AssetAnchor | null | undefined, anchorLocal: Vec3, scale: GlassesScale, tiltDeg: number): [Vec3, Vec3, Vec3] {
   const pl = placementOf(asset, scale, tiltDeg, anchorLocal);
   const tl = spec.temple_mm;
   const bend = Math.min(tl, asset?.temple_bend_mm ?? DEFAULT_TEMPLE_BEND_RATIO * tl);
   const drop = asset?.temple_drop_mm ?? DEFAULT_TEMPLE_DROP_MM;
-  const x = sign * hinge.halfWidth;
-  return [
-    toFaceLocal(pl, [x, hinge.y, hinge.z]),
-    toFaceLocal(pl, [x, hinge.y, hinge.z - bend]),
-    toFaceLocal(pl, [x, hinge.y - drop, hinge.z - tl]),
-  ];
+  const h = toFaceLocal(pl, [sign * hinge.halfWidth, hinge.y, hinge.z]);
+  const s = pl.sy;
+  return [h, [h[0], h[1], h[2] - bend * s], [h[0], h[1] - drop * s, h[2] - tl * s]];
 }
 
 /** Arm height at depth z along the polyline (clamped to its ends). */
@@ -278,7 +297,7 @@ export function solveClearance(input: ClearanceInput): ClearanceResult {
   const anchor0 = input.anchorLocal;
 
   // 1. Forward push from the rim back face and the pad centres against the front heightfields.
-  const rims = rimProbes(spec, asset, anchor0, scale, tiltDeg);
+  const rims = [...rimProbes(spec, asset, anchor0, scale, tiltDeg), ...bridgeProbes(spec, asset, anchor0, scale, tiltDeg)];
   const pads = padProbes(spec, asset, anchor0, scale, tiltDeg);
   type Hit = { gap: number };
   const brow: Hit[] = [], cheek: Hit[] = [], nose: Hit[] = [];

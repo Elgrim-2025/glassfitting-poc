@@ -517,7 +517,7 @@ def delete_hierarchy(root):
             bpy.data.meshes.remove(me)
 
 
-def build_all(defs, out_dir, only=None, keep=False):
+def build_all(defs, out_dir, only=None, keep=False, report_path=None):
     os.makedirs(out_dir, exist_ok=True)
     reports = []
     for d in defs:
@@ -532,8 +532,9 @@ def build_all(defs, out_dir, only=None, keep=False):
         print('[frame_builder]', json.dumps(rep))
         if not keep:
             delete_hierarchy(root)
-    with open(os.path.join(out_dir, 'build-report.json'), 'w') as f:
-        json.dump(reports, f, indent=2)
+    if report_path:
+        with open(report_path, 'w') as f:
+            json.dump(reports, f, indent=2)
     return reports
 
 
@@ -541,7 +542,7 @@ def main():
     argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
     frames_path = 'scripts/frames.json'
     out_dir = 'public/assets/frames'
-    only = None
+    only, report = None, None
     i = 0
     while i < len(argv):
         if argv[i] == '--frames':
@@ -550,11 +551,13 @@ def main():
             out_dir = argv[i + 1]; i += 2
         elif argv[i] == '--only':
             only = argv[i + 1].split(','); i += 2
+        elif argv[i] == '--report':
+            report = argv[i + 1]; i += 2
         else:
             i += 1
     with open(frames_path) as f:
         defs = json.load(f)['frames']
-    build_all(defs, out_dir, only)
+    build_all(defs, out_dir, only, report_path=report)
 
 
 if not globals().get('FRAME_BUILDER_NO_MAIN'):

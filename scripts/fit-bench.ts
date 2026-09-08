@@ -24,9 +24,11 @@ import { anchorFromDef, loadFrameDefs } from './lib/frame-defs.mjs';
 
 const ROOT = process.cwd();
 const OUT_DIR = resolve(ROOT, 'bench');
-const OUT_FILE = resolve(OUT_DIR, 'fit-bench.json');
+const OUT_FILE = resolve(OUT_DIR, process.env.DEPTH === 'landmark' ? 'fit-bench-landmark.json' : 'fit-bench.json');
 const POSES: Partial<SyntheticPose>[] = [{}, { yawDeg: 30 }, { yawDeg: -30 }, { pitchDeg: 15 }, { pitchDeg: -15 }];
 const WARMUP_FRAMES = 20;
+/** DEPTH=landmark runs the core with per-landmark depth (the synthetic z is exact, i.e. the true deformed face). */
+const DEPTH: 'canonical' | 'landmark' = process.env.DEPTH === 'landmark' ? 'landmark' : 'canonical';
 const FACE_T: [number, number, number] = [0, 0, -500];
 
 const r3 = (v: number) => (Number.isFinite(v) ? Math.round(v * 1000) / 1000 : v);
@@ -56,7 +58,7 @@ const variants = FACE_VARIANTS.map((variant) => {
     const frame = makeSyntheticFrame(full, 0, { vertices });
     const invTrue = mInvert(poseMatrixMm(full));
     for (const def of defs) {
-      const core = new FittingCore();
+      const core = new FittingCore({ placement: { depthSource: DEPTH } });
       core.setFrameSpec(def.spec, anchorFromDef(def));
       let out = core.process(frame);
       for (let i = 1; i <= WARMUP_FRAMES; i++) out = core.process({ ...frame, timestampMs: i * 33 });
@@ -71,6 +73,7 @@ const variants = FACE_VARIANTS.map((variant) => {
         frame_id: def.frame_id,
         glassesLocal: round(mMultiply(invTrue, out.glassesMatrix)),
         splay: [r3(splay[0]), r3(splay[1])],
+        tiltRad: r3((out.tiltDeg * Math.PI) / 180),
         forwardMm: r3(out.clearance.forwardMm),
         penetration: Object.fromEntries(Object.entries(out.clearance.penetration).map(([k, v]) => [k, r3(v)])),
         widthScale: r3(out.widthScale),
@@ -98,7 +101,7 @@ const doc = {
 writeFileSync(OUT_FILE, JSON.stringify(doc));
 const cfg = DEFAULT_CONFIG.placement.clearance;
 const p = overall.pen;
-console.log(`\n${variants.length} variants × ${POSES.length} poses × ${frames.length} frames = ${variants.length * POSES.length * frames.length} cases → ${OUT_FILE}`);
+console.log(`\n${variants.length} variants × ${POSES.length} poses × ${frames.length} frames = ${variants.length * POSES.length * frames.length} cases (depth: ${DEPTH}) → ${OUT_FILE}`);
 console.log(`overall: push max ${overall.forward.toFixed(2)} mm (limit ${cfg.maxForwardMm}, worst ${overall.worst}); splay ${deg(overall.splayMin).toFixed(1)}..${deg(overall.splayMax).toFixed(1)}° (limit ${cfg.maxSplayDeg}°)`);
 console.log(`overall residual penetration (mm, ≤ 0 ok): temple ${p.temple.toFixed(2)}  brow ${p.brow.toFixed(2)}  cheek ${p.cheek.toFixed(2)}  nose ${p.nose.toFixed(2)}`);
 for (const [id, s] of perFrame) {

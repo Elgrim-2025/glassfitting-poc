@@ -228,6 +228,7 @@ export class Panel {
     this.slider(s3, 'clearance', '브릿지 클리어런스 (mm)', -3, 6, 0.5, cfg.placement.bridgeClearanceMm, (v) => cb.onConfigPatch({ placement: { bridgeClearanceMm: v } }));
     this.slider(s3, 'tilt', '팬토스코픽 틸트 (°)', -5, 15, 0.5, cfg.placement.pantoscopicTiltDeg, (v) => cb.onConfigPatch({ placement: { pantoscopicTiltDeg: v } }));
     this.checkbox(s3, 'kabsch', '대안 경로: Kabsch 포즈', cfg.placement.useKabschPose, (v) => cb.onConfigPatch({ placement: { useKabschPose: v } }));
+    this.checkbox(s3, 'depthLm', '깊이: 랜드마크 z 사용 (정규 모델 대신 — 실기기에서 비교)', cfg.placement.depthSource === 'landmark', (v) => cb.onConfigPatch({ placement: { depthSource: v ? 'landmark' : 'canonical' } }));
     this.checkbox(s3, 'transpose', '행렬 전치(디버그)', cfg.transposeMatrix, (v) => cb.onConfigPatch({ transposeMatrix: v }));
     this.checkbox(s3, 'faceOcc', '얼굴 오클루더', this.render.faceOccluder, (v) => { this.render = { ...this.render, faceOccluder: v }; cb.onRender(this.render); });
     this.checkbox(s3, 'headOcc', '머리 오클루더', this.render.headOccluder, (v) => { this.render = { ...this.render, headOccluder: v }; cb.onRender(this.render); });
