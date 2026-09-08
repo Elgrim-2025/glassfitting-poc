@@ -1,5 +1,5 @@
 /** Debug / QA panel: readouts, filter tuning, toggles, PD, recording and export controls. */
-import type { FittingConfig, PdEstimate, TrackingState, Angles } from '../../core/types';
+import type { Angles, ClearanceResult, FittingConfig, PdEstimate, TrackingState } from '../../core/types';
 import type { FittingConfigPatch } from '../../core/config';
 import type { ProductFrame } from '../product/adapter';
 import type { TrackerProfile } from '../tracker';
@@ -22,6 +22,7 @@ export interface PanelStats {
   uniformScale: number;
   realSizeActive: boolean;
   splayDeg: { left: number; right: number };
+  clearance: ClearanceResult | null;
   jitterRaw: { positionPx: number; rotationDeg: number };
   jitterFiltered: { positionPx: number; rotationDeg: number };
   latencyMs: number;
@@ -220,9 +221,12 @@ export class Panel {
     const s3 = this.section('위치 · 렌더');
     this.readout(s3, 'scale', '폭 스케일 / 균일 스케일');
     this.readout(s3, 'splay', '다리 벌림 L / R (°)');
+    this.readout(s3, 'pen', '관통 잔여 (mm) 다리/눈썹/볼/코');
+    this.readout(s3, 'forward', '전방 보정 (mm)');
     this.checkbox(s3, 'widthScale', '폭 비율 보정', cfg.placement.widthScaleEnabled, (v) => cb.onConfigPatch({ placement: { widthScaleEnabled: v } }));
     this.checkbox(s3, 'realSize', '실치수 모드 (PD 준비 시)', cfg.placement.realSizeMode, (v) => cb.onConfigPatch({ placement: { realSizeMode: v } }));
     this.slider(s3, 'clearance', '브릿지 클리어런스 (mm)', -3, 6, 0.5, cfg.placement.bridgeClearanceMm, (v) => cb.onConfigPatch({ placement: { bridgeClearanceMm: v } }));
+    this.slider(s3, 'tilt', '팬토스코픽 틸트 (°)', -5, 15, 0.5, cfg.placement.pantoscopicTiltDeg, (v) => cb.onConfigPatch({ placement: { pantoscopicTiltDeg: v } }));
     this.checkbox(s3, 'kabsch', '대안 경로: Kabsch 포즈', cfg.placement.useKabschPose, (v) => cb.onConfigPatch({ placement: { useKabschPose: v } }));
     this.checkbox(s3, 'transpose', '행렬 전치(디버그)', cfg.transposeMatrix, (v) => cb.onConfigPatch({ transposeMatrix: v }));
     this.checkbox(s3, 'faceOcc', '얼굴 오클루더', this.render.faceOccluder, (v) => { this.render = { ...this.render, faceOccluder: v }; cb.onRender(this.render); });
@@ -303,6 +307,17 @@ export class Panel {
     this.set('tz', fmt(s.matrixTz, 0), s.matrixTz < -100 && s.matrixTz > -2000 ? 'ok' : 'bad');
     this.set('scale', `${fmt(s.widthScale, 3)} / ${fmt(s.uniformScale, 3)}${s.realSizeActive ? ' (실치수)' : ''}`);
     this.set('splay', `${fmt(s.splayDeg.left, 1)} / ${fmt(s.splayDeg.right, 1)}`);
+    const c = s.clearance;
+    if (c) {
+      const p = c.penetration;
+      // −Infinity (no probe near that region) renders as '—' and counts as clear.
+      const clear = p.temple <= 0 && p.brow <= 0 && p.cheek <= 0 && p.nose <= 0;
+      this.set('pen', `${fmt(p.temple, 1)} / ${fmt(p.brow, 1)} / ${fmt(p.cheek, 1)} / ${fmt(p.nose, 1)}`, clear ? 'ok' : 'bad');
+      this.set('forward', fmt(c.forwardMm, 1));
+    } else {
+      this.set('pen', '—');
+      this.set('forward', '—');
+    }
     const pd = s.pd;
     const reject = pd.last_reject ? REJECT_KO[pd.last_reject] ?? pd.last_reject : '채택';
     this.set('pdStatus', `${pd.status} / ${pd.sample_count} / ${reject}`, pd.status === 'ready' ? 'ok' : '');

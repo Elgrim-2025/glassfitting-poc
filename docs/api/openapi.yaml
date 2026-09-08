@@ -96,6 +96,10 @@ components:
         temple_left: { $ref: '#/components/schemas/Vec3', description: −X 쪽 힌지 }
         temple_right: { $ref: '#/components/schemas/Vec3', description: +X 쪽 힌지 }
         nose_pad_offset: { $ref: '#/components/schemas/Vec3' }
+        lens_plane_mm: { type: number, description: 렌즈 평면 z (mm, 기본 4). 클리어런스 솔버 메타 }
+        rim_depth_mm: { type: number, description: 렌즈 평면에서 림 뒷면까지 (mm, 기본 4) }
+        temple_bend_mm: { type: number, description: 힌지에서 귀 굽힘 시작까지 다리 직선 길이 (mm, 기본 0.68·temple_mm) }
+        temple_drop_mm: { type: number, description: 굽힘 이후 다리 끝까지 내려가는 높이 (mm, 기본 28) }
     Frame:
       type: object
       required: [frame_id, name, spec, assets, version, updated_at]
