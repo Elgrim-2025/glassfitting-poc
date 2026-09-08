@@ -1,0 +1,30 @@
+{
+  "name": "glassfitting-poc",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Web-based AI virtual glasses fitting PoC (MediaPipe Face Landmarker + Three.js)",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview --host",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "setup:models": "node scripts/fetch-models.mjs",
+    "setup:canonical": "node scripts/canonical-to-ts.mjs",
+    "setup:frames": "node scripts/gen-frames.mjs",
+    "setup": "npm run setup:models && npm run setup:canonical && npm run setup:frames",
+    "postinstall": "node scripts/copy-wasm.mjs"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^1.0.1",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.185.0",
+    "typescript": "^5.9.0",
+    "vite": "^8.2.2",
+    "vitest": "^5.0.0"
+  }
+}
