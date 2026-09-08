@@ -26,7 +26,10 @@ export interface TrackerPaths {
   model: string;
 }
 
-export const DEFAULT_TRACKER_PATHS: TrackerPaths = { wasm: '/wasm', model: '/models/face_landmarker.task' };
+export const DEFAULT_TRACKER_PATHS: TrackerPaths = {
+  wasm: `${import.meta.env.BASE_URL}wasm`,
+  model: `${import.meta.env.BASE_URL}models/face_landmarker.task`,
+};
 
 let filesetPromise: Promise<Awaited<ReturnType<typeof FilesetResolver.forVisionTasks>>> | null = null;
 const fileset = (wasm: string) => (filesetPromise ??= FilesetResolver.forVisionTasks(wasm));

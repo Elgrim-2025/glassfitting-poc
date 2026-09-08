@@ -39,7 +39,7 @@ export class GlassesRig {
   private loader: GLTFLoader;
   private loadToken = 0;
 
-  constructor(dracoPath = '/draco/') {
+  constructor(dracoPath = `${import.meta.env.BASE_URL}draco/`) {
     this.group.matrixAutoUpdate = false;
     this.group.visible = false;
     this.loader = new GLTFLoader();

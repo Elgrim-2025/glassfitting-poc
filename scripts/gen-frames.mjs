@@ -154,8 +154,8 @@ for (const def of FRAMES) {
     name: def.name,
     spec: def.spec,
     assets: {
-      glb_url: `/assets/frames/${def.frame_id}.glb`,
-      thumbnail_url: `/assets/frames/${def.frame_id}.svg`,
+      glb_url: `assets/frames/${def.frame_id}.glb`,
+      thumbnail_url: `assets/frames/${def.frame_id}.svg`,
       anchor: built.anchors,
     },
     fit_hints: def.fit_hints,

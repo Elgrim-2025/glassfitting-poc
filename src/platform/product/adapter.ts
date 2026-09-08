@@ -24,7 +24,7 @@ export interface FitSessionPayload {
 }
 
 export class ProductAdapter {
-  constructor(private baseUrl = '/api/v1') {}
+  constructor(private baseUrl = `${import.meta.env.BASE_URL}api/v1`) {}
 
   async list(): Promise<ProductFrame[]> {
     // Mock: static file. Real API: GET /v1/frames?page=&size=&updated_after=

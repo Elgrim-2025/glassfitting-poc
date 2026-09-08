@@ -12,8 +12,8 @@
         "nose_pad": "fixed"
       },
       "assets": {
-        "glb_url": "/assets/frames/FR-0001.glb",
-        "thumbnail_url": "/assets/frames/FR-0001.svg",
+        "glb_url": "assets/frames/FR-0001.glb",
+        "thumbnail_url": "assets/frames/FR-0001.svg",
         "anchor": {
           "bridge": [
             0,
@@ -58,8 +58,8 @@
         "nose_pad": "adjustable"
       },
       "assets": {
-        "glb_url": "/assets/frames/FR-0002.glb",
-        "thumbnail_url": "/assets/frames/FR-0002.svg",
+        "glb_url": "assets/frames/FR-0002.glb",
+        "thumbnail_url": "assets/frames/FR-0002.svg",
         "anchor": {
           "bridge": [
             0,
@@ -104,8 +104,8 @@
         "nose_pad": "adjustable"
       },
       "assets": {
-        "glb_url": "/assets/frames/FR-0003.glb",
-        "thumbnail_url": "/assets/frames/FR-0003.svg",
+        "glb_url": "assets/frames/FR-0003.glb",
+        "thumbnail_url": "assets/frames/FR-0003.svg",
         "anchor": {
           "bridge": [
             0,

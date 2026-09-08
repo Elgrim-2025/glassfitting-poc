@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  // GitHub Pages project sites are served from /<repo>/; CI sets BASE_PATH for the deploy build.
+  base: process.env.BASE_PATH ?? '/',
   server: {
     port: 5173,
     // Camera access needs a secure context; localhost is treated as secure.
