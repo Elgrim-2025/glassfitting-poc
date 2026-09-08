@@ -74,24 +74,38 @@ export class SessionReplayer {
     return this.frames[this.frames.length - 1].timestampMs - this.frames[0].timestampMs + 33;
   }
 
+  /**
+   * Emits frames on their recorded timestamps (× speed). A short timer with catch-up is used
+   * rather than requestAnimationFrame so replay also progresses in throttled/hidden tabs
+   * (where rAF pauses and timers fire at 1 Hz).
+   */
   play(onFrame: (frame: FrameInput, index: number) => void, onLoop?: () => void): void {
     if (this.frames.length === 0) return;
     this.active = true;
+    let wallStart = performance.now();
+    let tsStart = this.frames[this.idx].timestampMs;
     const step = () => {
       if (!this.active) return;
-      if (this.idx >= this.frames.length) {
-        if (!this.loop) { this.active = false; return; }
-        this.idx = 0;
-        this.loops++;
-        onLoop?.();
+      const now = performance.now();
+      const elapsed = (now - wallStart) * this.speed;
+      let emitted = 0;
+      while (this.active && emitted < 60) {
+        if (this.idx >= this.frames.length) {
+          if (!this.loop) { this.active = false; return; }
+          this.idx = 0;
+          this.loops++;
+          wallStart = now;
+          tsStart = this.frames[0].timestampMs;
+          onLoop?.();
+          break;
+        }
+        const f = this.frames[this.idx];
+        if (f.timestampMs - tsStart > elapsed) break;
+        onFrame({ ...f, timestampMs: f.timestampMs + this.loops * this.duration }, this.idx);
+        this.idx++;
+        emitted++;
       }
-      const f = this.frames[this.idx];
-      const offset = this.loops * this.duration;
-      onFrame({ ...f, timestampMs: f.timestampMs + offset }, this.idx);
-      const next = this.frames[this.idx + 1];
-      const dt = next ? Math.max(1, next.timestampMs - f.timestampMs) : 33;
-      this.idx++;
-      this.timer = window.setTimeout(step, dt / this.speed);
+      this.timer = window.setTimeout(step, 15);
     };
     step();
   }

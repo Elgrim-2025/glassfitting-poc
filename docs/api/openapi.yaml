@@ -1,0 +1,132 @@
+openapi: 3.1.0
+info:
+  title: 제품 마스터 API (가상 피팅 연동 규격 초안)
+  version: 0.1.0
+  description: |
+    피팅 모듈이 프레임 스펙과 3D 에셋을 받아오는 읽기 전용 인터페이스(기획서 부록 B).
+    발주사 시스템이 이 규격으로 응답하면 `src/platform/product/adapter.ts` 수정 없이 동작한다.
+    PoC에서는 `public/api/v1/*.json` 정적 파일이 같은 형태로 응답한다.
+servers:
+  - url: https://example.com/v1
+    description: 발주사 제품 마스터 (예시)
+  - url: http://localhost:5173/api/v1
+    description: PoC mock (정적 JSON)
+paths:
+  /frames:
+    get:
+      summary: 프레임 목록 (페이징, 증분 동기화)
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: size, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: updated_after, in: query, description: 이 시각 이후 변경분만, schema: { type: string, format: date-time } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page, size, total]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Frame' } }
+                  page: { type: integer }
+                  size: { type: integer }
+                  total: { type: integer }
+  /frames/{frame_id}:
+    get:
+      summary: 프레임 상세 (스펙 + 에셋)
+      parameters:
+        - { name: frame_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Frame' }
+        '404': { description: 없음 }
+  /frames/{frame_id}/assets/{variant}:
+    get:
+      summary: GLB·썸네일 리소스
+      description: 캐시 헤더(ETag, Cache-Control) 필수. GLB는 `model/gltf-binary`.
+      parameters:
+        - { name: frame_id, in: path, required: true, schema: { type: string } }
+        - { name: variant, in: path, required: true, schema: { type: string, enum: [glb, thumbnail] } }
+      responses:
+        '200':
+          description: 바이너리
+          content:
+            model/gltf-binary: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+            image/svg+xml: { schema: { type: string } }
+  /fit-sessions:
+    post:
+      summary: PD 측정·착용 결과 로그 (선택, 동의 시 수치만)
+      description: 영상·랜드마크는 전송하지 않는다. 사용자 동의(`consent: true`)가 없으면 호출하지 않는다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FitSession' }
+      responses:
+        '201': { description: 저장됨 }
+components:
+  schemas:
+    Vec3:
+      type: array
+      items: { type: number }
+      minItems: 3
+      maxItems: 3
+      description: mm 단위 [x, y, z]
+    FrameSpec:
+      type: object
+      required: [lens_width_mm, bridge_mm, temple_mm, lens_height_mm, frame_width_mm, nose_pad]
+      properties:
+        lens_width_mm: { type: number, example: 52 }
+        bridge_mm: { type: number, example: 18 }
+        temple_mm: { type: number, example: 140 }
+        lens_height_mm: { type: number, example: 40 }
+        frame_width_mm: { type: number, description: 힌지–힌지 전체 폭, example: 138 }
+        nose_pad: { type: string, enum: [fixed, adjustable] }
+    Anchor:
+      type: object
+      description: GLB 원점(브릿지 중심) 기준 앵커 좌표 (docs/assets/glb-spec.md)
+      required: [bridge, temple_left, temple_right, nose_pad_offset]
+      properties:
+        bridge: { $ref: '#/components/schemas/Vec3' }
+        temple_left: { $ref: '#/components/schemas/Vec3', description: −X 쪽 힌지 }
+        temple_right: { $ref: '#/components/schemas/Vec3', description: +X 쪽 힌지 }
+        nose_pad_offset: { $ref: '#/components/schemas/Vec3' }
+    Frame:
+      type: object
+      required: [frame_id, name, spec, assets, version, updated_at]
+      properties:
+        frame_id: { type: string, example: FR-0001 }
+        name: { type: string, example: 샘플 사각 프레임 }
+        spec: { $ref: '#/components/schemas/FrameSpec' }
+        assets:
+          type: object
+          required: [glb_url, thumbnail_url, anchor]
+          properties:
+            glb_url: { type: string, format: uri }
+            thumbnail_url: { type: string, format: uri }
+            anchor: { $ref: '#/components/schemas/Anchor' }
+        fit_hints:
+          type: object
+          properties:
+            recommended_pd_range_mm: { type: array, items: { type: number }, minItems: 2, maxItems: 2 }
+            shape: { type: string, enum: [square, round, aviator], description: 절차적 대체 형상 힌트(선택) }
+        version: { type: integer, example: 3 }
+        updated_at: { type: string, format: date-time }
+    FitSession:
+      type: object
+      required: [pd_far, pd_near, confidence, sample_count, consent]
+      properties:
+        frame_id: { type: [string, 'null'] }
+        pd_far: { type: number, description: 원용 PD (mm, 참고용) }
+        pd_near: { type: number }
+        pd_mono_left: { type: number }
+        pd_mono_right: { type: number }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+        sample_count: { type: integer }
+        device: { type: string }
+        consent: { type: boolean, const: true }
