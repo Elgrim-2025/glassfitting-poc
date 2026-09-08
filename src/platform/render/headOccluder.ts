@@ -60,7 +60,7 @@ export class HeadOccluder {
   }
 
   /** Loads the Blender-built proxy; keeps the ellipsoid on failure. */
-  async load(url = '/models/head_occluder.glb'): Promise<'glb' | 'ellipsoid'> {
+  async load(url = `${import.meta.env.BASE_URL}models/head_occluder.glb`): Promise<'glb' | 'ellipsoid'> {
     try {
       const gltf = await new GLTFLoader().loadAsync(url);
       let geo: THREE.BufferGeometry | null = null;
