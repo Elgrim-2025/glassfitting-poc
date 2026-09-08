@@ -38,7 +38,8 @@ export class SceneRenderer {
     const fill = new THREE.DirectionalLight(0xffffff, 0.5);
     fill.position.set(-500, 100, 300);
     this.scene.add(fill);
-    this.scene.add(this.faceOccluder.mesh, this.headOccluder.mesh, this.glasses.group);
+    this.scene.add(this.faceOccluder.mesh, this.headOccluder.group, this.glasses.group);
+    void this.headOccluder.load();
   }
 
   /** Match the tracker's image size and FOV so projections line up with the video. */
@@ -63,7 +64,7 @@ export class SceneRenderer {
     if (out && out.faceMetricPoints && out.faceMatrix && out.alpha > 0) {
       this.faceOccluder.update(out.faceMetricPoints);
       this.faceOccluder.visible = opts.faceOccluder;
-      this.headOccluder.update(out.faceMatrix, out.widthScale * out.uniformScale);
+      this.headOccluder.update(out, this.glasses.hingeInfo);
       this.headOccluder.visible = opts.headOccluder;
     } else {
       this.faceOccluder.visible = false;

@@ -33,6 +33,10 @@ export class GlassesRig {
   private templeR: THREE.Object3D | null = null;
   private hingeL = new THREE.Vector3();
   private hingeR = new THREE.Vector3();
+  /** Hinge positions in the asset frame (mm), for the head occluder's adaptive width. */
+  get hingeInfo(): { left: THREE.Vector3; right: THREE.Vector3 } | null {
+    return this.model ? { left: this.hingeL, right: this.hingeR } : null;
+  }
   private materials: { mat: THREE.Material; baseOpacity: number; baseTransparent: boolean }[] = [];
   private lastAlpha = -1;
   private lastSplay = { left: NaN, right: NaN };
@@ -61,7 +65,7 @@ export class GlassesRig {
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
       console.warn('[glasses] GLB load failed, using procedural geometry:', error);
-      const p = buildProceduralGlasses(item.spec, inferShape(item));
+      const p = buildProceduralGlasses(item.spec, inferShape(item), item.assets.anchor);
       root = p.root;
       anchor = p.anchor;
       source = 'procedural';

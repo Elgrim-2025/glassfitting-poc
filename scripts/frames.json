@@ -12,7 +12,7 @@
       "build": {
         "lens_plane_mm": 3, "rim_width_mm": 4.5, "rim_depth_mm": 4.0, "rim_bevel_mm": 0.8,
         "lens_center_y_mm": -3, "bridge_height_ratio": 0.3, "bridge_arch_mm": 2.5,
-        "hinge_y_mm": 13, "hinge_z_mm": 2, "endpiece_mm": 6,
+        "hinge_y_mm": 13, "hinge_z_mm": 2, "hinge_inset_mm": 1.5, "endpiece_mm": 6,
         "temple_bend_mm": 95, "temple_drop_mm": 28, "temple_hook_mm": 2,
         "temple_section_mm": [4.0, 2.5], "temple_tip_section_mm": [3.0, 2.0],
         "pad_center": [8, -4, -2], "pad_size_mm": [8, 5, 2]
@@ -30,7 +30,7 @@
       "build": {
         "lens_plane_mm": 5, "rim_width_mm": 1.8, "rim_depth_mm": 2.2, "rim_bevel_mm": 0.5,
         "lens_center_y_mm": -3, "bridge_height_ratio": 0.3, "bridge_arch_mm": 2.5,
-        "hinge_y_mm": 13, "hinge_z_mm": 3, "endpiece_mm": 5,
+        "hinge_y_mm": 13, "hinge_z_mm": 3, "hinge_inset_mm": 1.2, "endpiece_mm": 5,
         "temple_bend_mm": 99, "temple_drop_mm": 28, "temple_hook_mm": 2,
         "temple_section_mm": [1.8, 1.8], "temple_tip_section_mm": [3.5, 3.0],
         "pad_center": [11.5, -4, -3], "pad_size_mm": [8, 14, 1.5], "pad_tilt_deg": 20
@@ -48,7 +48,7 @@
       "build": {
         "lens_plane_mm": 5, "rim_width_mm": 1.8, "rim_depth_mm": 2.2, "rim_bevel_mm": 0.5,
         "lens_center_y_mm": -3, "bridge_height_ratio": 0.3, "bridge_arch_mm": 2.5, "double_bridge_mm": 6,
-        "hinge_y_mm": 13, "hinge_z_mm": 3, "endpiece_mm": 5,
+        "hinge_y_mm": 13, "hinge_z_mm": 3, "hinge_inset_mm": 1.2, "endpiece_mm": 5,
         "temple_bend_mm": 95, "temple_drop_mm": 28, "temple_hook_mm": 2,
         "temple_section_mm": [1.8, 1.8], "temple_tip_section_mm": [3.5, 3.0],
         "pad_center": [8, -4, -3], "pad_size_mm": [8, 14, 1.5], "pad_tilt_deg": 20

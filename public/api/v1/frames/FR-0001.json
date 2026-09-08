@@ -19,28 +19,33 @@
         0
       ],
       "temple_left": [
-        -69,
+        -67.5,
         13,
         2
       ],
       "temple_right": [
-        69,
+        67.5,
         13,
         2
       ],
       "nose_pad_offset": [
         0,
-        -3.5,
-        1.5
-      ]
+        -4,
+        -2
+      ],
+      "lens_plane_mm": 3,
+      "rim_depth_mm": 4,
+      "temple_bend_mm": 95,
+      "temple_drop_mm": 28
     }
   },
   "fit_hints": {
     "recommended_pd_range_mm": [
       58,
       68
-    ]
+    ],
+    "shape": "square"
   },
-  "version": 1,
+  "version": 2,
   "updated_at": "2026-09-08T00:00:00Z"
 }
