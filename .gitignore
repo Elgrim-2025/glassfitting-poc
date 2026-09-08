@@ -5,3 +5,4 @@ public/models/face_landmarker.task
 .DS_Store
 *.log
 recordings/
+public/draco/

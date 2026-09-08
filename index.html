@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>AI 가상 안경 피팅 PoC</title>
+  </head>
+  <body>
+    <div id="app">
+      <main class="stage-wrap">
+        <div id="stage" class="stage mirrored">
+          <video id="video" playsinline muted autoplay></video>
+          <canvas id="gl"></canvas>
+          <canvas id="overlay"></canvas>
+        </div>
+        <div class="stage-ui">
+          <div id="badge" class="badge">대기</div>
+          <div class="notice">PD 값은 참고용입니다 — 검안·조제용이 아닙니다. 영상은 기기 밖으로 전송되지 않습니다.</div>
+          <button id="start" class="start">카메라 시작</button>
+        </div>
+      </main>
+      <aside id="panel" class="panel"></aside>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
