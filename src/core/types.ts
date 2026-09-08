@@ -143,7 +143,15 @@ export interface FitOutput {
   /** 478 × 3 camera-space points in mm (screen-exact xy), for occlusion/HUD. */
   faceMetricPoints: Float32Array | null;
   angles: Angles | null;
+  /** X-only proportional width correction actually applied. */
   widthScale: number;
+  /** Uniform scale actually applied (≠ 1 only in real-size mode with a PD estimate). */
+  uniformScale: number;
+  realSizeActive: boolean;
+  /** Nose landing anchor in the face-local frame (mm). */
+  anchorLocal: Vec3 | null;
+  /** Outward temple rotation about each hinge (radians). */
+  templeSplay: { left: number; right: number };
   /** Bridge anchor in camera space (mm) and its projection (normalized). */
   bridgeAnchor: { point: Vec3; screen: { x: number; y: number } } | null;
   pd: PdEstimate;
