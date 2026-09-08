@@ -1,8 +1,9 @@
 import type { BufferGeometry, Shape } from 'three';
-import type { FrameSpec } from '../../src/core/types';
+import type { AssetAnchor, FrameSpec } from '../../src/core/types';
+import type { FrameBuild } from './frame-defs';
 
-export type FrameShape = 'square' | 'round' | 'aviator';
-export interface FrameGeometryDef { shape: FrameShape; spec: FrameSpec }
+export type FrameShape = 'square' | 'round' | 'aviator' | 'wellington';
+export interface FrameGeometryDef { shape: FrameShape; spec: FrameSpec; build?: Partial<FrameBuild> }
 export interface FrameGeometry {
   frontZ: number;
   hingeY: number;
@@ -13,9 +14,9 @@ export interface FrameGeometry {
   lensR: BufferGeometry;
   templeL: BufferGeometry;
   templeR: BufferGeometry;
-  anchors: { bridge: number[]; temple_left: number[]; temple_right: number[]; nose_pad_offset: number[] };
+  anchors: AssetAnchor;
 }
 export const RIM_RADIUS: number;
 export const TEMPLE_RADIUS: number;
-export function lensShape(kind: FrameShape, w: number, h: number): Shape;
+export function lensShape(kind: FrameShape, w: number, h: number, build?: Partial<FrameBuild>): Shape;
 export function buildFrameGeometry(def: FrameGeometryDef): FrameGeometry;

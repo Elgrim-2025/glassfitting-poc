@@ -45,7 +45,31 @@ export class FaceTracker {
     readonly effectiveDelegate: 'GPU' | 'CPU',
   ) {}
 
+  /**
+   * Fails fast with a readable message when the self-hosted runtime files are missing
+   * (fresh clone / git worktree without `npm run setup`), instead of MediaPipe's opaque
+   * "GPU delegate failed" + 404 chain.
+   */
+  static async checkAssets(paths: TrackerPaths = DEFAULT_TRACKER_PATHS): Promise<void> {
+    const urls = [`${paths.wasm}/vision_wasm_internal.js`, `${paths.wasm}/vision_wasm_internal.wasm`, paths.model];
+    const missing: string[] = [];
+    for (const url of urls) {
+      try {
+        // Vite's dev server answers unknown paths with index.html (200), so also reject HTML bodies.
+        const res = await fetch(url, { method: 'HEAD' });
+        const type = res.headers.get('content-type') ?? '';
+        if (!res.ok || /text\/html/i.test(type)) missing.push(`${url} (HTTP ${res.status}${type ? ', ' + type.split(';')[0] : ''})`);
+      } catch {
+        missing.push(url);
+      }
+    }
+    if (missing.length) {
+      throw new Error(`런타임 파일 없음: ${missing.join(', ')} — 프로젝트 폴더에서 \`npm run setup\` (또는 \`node scripts/ensure-runtime-assets.mjs\`) 실행 후 dev 서버를 다시 시작하세요.`);
+    }
+  }
+
   static async create(profile: TrackerProfile, paths: TrackerPaths = DEFAULT_TRACKER_PATHS): Promise<FaceTracker> {
+    await FaceTracker.checkAssets(paths);
     const fs = await fileset(paths.wasm);
     const make = (delegate: 'GPU' | 'CPU') =>
       FaceLandmarker.createFromOptions(fs, {

@@ -6,3 +6,4 @@ public/models/face_landmarker.task
 *.log
 recordings/
 public/draco/
+bench/

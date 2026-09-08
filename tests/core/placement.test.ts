@@ -49,10 +49,25 @@ describe('solveNoseLanding', () => {
     expect(r.landingY).toBeCloseTo(yOf(LM.BRIDGE), 3);
     expect(r.anchor[2]).toBeCloseTo(zOf(LM.BRIDGE) + 1, 3);
   });
+  it('rests the nose pads on the flanks when the asset describes them (pad contact, not ridge + clearance)', () => {
+    const { face, metric } = setup();
+    const asset = { bridge: [0, 0, 0] as [number, number, number], temple_left: [-67.5, 13, 6] as [number, number, number], temple_right: [67.5, 13, 6] as [number, number, number], nose_pad_offset: [8, -4, 0] as [number, number, number] };
+    const r = solveNoseLanding(metric, face, spec, DEFAULT_CONFIG.placement, asset, { uniform: 1, width: 1 }, 0);
+    expect(r.padContact).toBe(true);
+    expect(r.landingY).toBeCloseTo(yOf(LM.BRIDGE), 3);
+    // Canonical flank at (±8, 20.7) is ≈ 53.3 mm; the contact face sinks padSinkMm (1) into it.
+    expect(r.anchor[2]).toBeGreaterThan(51);
+    expect(r.anchor[2]).toBeLessThan(54);
+    expect(r.anchor[2]).toBeLessThan(zOf(LM.BRIDGE) - 3);
+    // The pantoscopic tilt moves the pad contact point, and the origin follows.
+    const tilted = solveNoseLanding(metric, face, spec, DEFAULT_CONFIG.placement, asset, { uniform: 1, width: 1 }, 8);
+    expect(Math.abs(tilted.anchor[2] - r.anchor[2])).toBeLessThan(2);
+    expect(tilted.anchor[2]).not.toBeCloseTo(r.anchor[2], 3);
+  });
   it('adjustable pads and a wider bridge land lower and on the ridge surface', () => {
     const { face, metric } = setup();
     const r = solveNoseLanding(metric, face, { ...spec, bridge_mm: 20, nose_pad: 'adjustable' }, DEFAULT_CONFIG.placement);
-    expect(r.landingY).toBeCloseTo(yOf(LM.BRIDGE) - 3 - 1.6, 3);
+    expect(r.landingY).toBeCloseTo(yOf(LM.BRIDGE) - 5 - 1.6, 3);
     expect(r.landingY).toBeGreaterThan(yOf(197));
     // Interpolated depth lies between the neighbouring ridge points.
     const lo = Math.min(zOf(LM.BRIDGE), zOf(197)), hi = Math.max(zOf(LM.BRIDGE), zOf(197));
@@ -78,6 +93,20 @@ describe('composeGlassesMatrix', () => {
     const m = composeGlassesMatrix(face, [0, 0, 60], { uniform: 1, width: 1 }, asset);
     const bridgeWorld = mTransformPoint(m, [0, 2, -3]);
     mTransformPoint(face, [0, 0, 60]).forEach((v, i) => expect(bridgeWorld[i]).toBeCloseTo(v, 6));
+  });
+  it('positive pantoscopic tilt moves the lens top toward +Z (camera) and the temple tips up', () => {
+    const face = poseMatrixMm({ t: [0, 0, -500] });
+    const flat = composeGlassesMatrix(face, [0, 0, 60], { uniform: 1, width: 1 }, null, 0);
+    const tilted = composeGlassesMatrix(face, [0, 0, 60], { uniform: 1, width: 1 }, null, 8);
+    // Origin (bridge) is unaffected by the tilt.
+    mTransformPoint(flat, [0, 0, 0]).forEach((v, i) => expect(mTransformPoint(tilted, [0, 0, 0])[i]).toBeCloseTo(v, 6));
+    const topFlat = mTransformPoint(flat, [0, 20, 0]);
+    const topTilted = mTransformPoint(tilted, [0, 20, 0]);
+    expect(topTilted[2] - topFlat[2]).toBeCloseTo(20 * Math.sin((8 * Math.PI) / 180), 6);
+    expect(topTilted[1]).toBeLessThan(topFlat[1]);
+    const tipFlat = mTransformPoint(flat, [0, 0, -100]);
+    const tipTilted = mTransformPoint(tilted, [0, 0, -100]);
+    expect(tipTilted[1] - tipFlat[1]).toBeCloseTo(100 * Math.sin((8 * Math.PI) / 180), 6);
   });
 });
 

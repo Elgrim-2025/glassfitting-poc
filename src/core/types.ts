@@ -50,7 +50,68 @@ export interface AssetAnchor {
   bridge: Vec3;
   temple_left: Vec3;
   temple_right: Vec3;
+  /**
+   * Nose-pad contact point of the +X pad (mm): x = pad centre |x| (0 → derived from the
+   * spec's bridge width), y = pad centre height, z = contact face depth (0 when the origin
+   * is the contact plane).
+   */
   nose_pad_offset: Vec3;
+  /** Lens plane z in GLB coordinates (mm, default 4). */
+  lens_plane_mm?: number;
+  /** Lens back-surface z at the optical centre (mm, default lens_plane_mm − 1); vertex distance is measured to it. */
+  lens_back_mm?: number;
+  /** Depth from the lens plane to the rim's back face (mm, default 4). */
+  rim_depth_mm?: number;
+  /** Rim back-face z (mm, default lens_plane_mm − rim_depth_mm). */
+  rim_back_mm?: number;
+  /**
+   * Outer boundary of the +X rim (closed polyline, frame mm, [x, y] pairs, any point count);
+   * the −X rim is its mirror. The clearance solver probes this outline on the rim back face.
+   * Default: the lens box grown by rim_width_mm as a rounded rectangle.
+   */
+  rim_outline_mm?: [number, number][];
+  /** Rim width from the lens edge outward (mm), default 4; the inner rims reach this far toward the nose. */
+  rim_width_mm?: number;
+  /** Straight arm length from the hinge to where the ear bend starts (mm, default 0.68·temple_mm). */
+  temple_bend_mm?: number;
+  /** Height the arm drops from the bend to its tip (mm, default 28). */
+  temple_drop_mm?: number;
+}
+
+/** Per-region residual penetration after the clearance correction (mm, positive = still penetrating). */
+export interface ClearancePenetration {
+  temple: number;
+  brow: number;
+  cheek: number;
+  nose: number;
+}
+
+export interface ClearanceResult {
+  /** Unfiltered outward temple rotation about each hinge (radians). */
+  splay: { left: number; right: number };
+  /** Forward (+Z) push applied to the nose-landing anchor (mm; negative when the vertex cap pulls the frame back). */
+  forwardMm: number;
+  penetration: ClearancePenetration;
+  /** Vertex distance after the correction: lens back surface to the corneal apex (mm). */
+  vertexMm: number;
+  /** Gap between the pad contact faces and the nose flank after the correction (mm, + = floating, − = sunk). */
+  padGapMm: number;
+}
+
+export interface ClearanceConfig {
+  /** Required gap between the arm centreline and the side of the head (mm). */
+  templeMm: number;
+  /** Required gap between the rim's back face and the brow/cheek/nose surface (mm). */
+  rimMm: number;
+  /** How far a nose pad may sink into the skin (mm). */
+  padSinkMm: number;
+  /** How far the rim may sink into the nose flank before it is pushed forward (mm). */
+  noseSinkMm: number;
+  maxForwardMm: number;
+  maxSplayDeg: number;
+  /** Vertex distance (lens back → cornea) range the forward push is clamped to (mm). */
+  vertexMinMm: number;
+  vertexMaxMm: number;
 }
 
 export interface PdEstimate {
@@ -105,12 +166,21 @@ export interface FittingConfig {
     realSizeMode: boolean;
     widthScaleMin: number;
     widthScaleMax: number;
-    /** Extra forward offset of the bridge from the nose surface (mm). */
+    /** Required gap between the bridge bar and the nose ridge (mm); also the ridge fallback offset without pad data. */
     bridgeClearanceMm: number;
     /** Vertical landing offset presets by nose-pad type (mm, negative = lower). */
     nosePadDropMm: Record<NosePadType, number>;
     /** Use Kabsch pose estimated from landmarks instead of the MediaPipe matrix. */
     useKabschPose: boolean;
+    /**
+     * Depth of the metric face points: 'canonical' = the posed canonical model everywhere (stable,
+     * canonical nose), 'landmark' = MediaPipe's per-landmark z everywhere (personal relief, noisier),
+     * 'hybrid' = canonical depth with the nose relief taken from the landmark z (default).
+     */
+    depthSource: 'canonical' | 'landmark' | 'hybrid';
+    /** Pantoscopic tilt about +X (deg); positive tips the lens top toward the camera. */
+    pantoscopicTiltDeg: number;
+    clearance: ClearanceConfig;
   };
   pd: {
     irisDiameterMm: number;
@@ -150,8 +220,12 @@ export interface FitOutput {
   realSizeActive: boolean;
   /** Nose landing anchor in the face-local frame (mm). */
   anchorLocal: Vec3 | null;
-  /** Outward temple rotation about each hinge (radians). */
+  /** Outward temple rotation about each hinge (radians), temporally filtered. */
   templeSplay: { left: number; right: number };
+  /** Pantoscopic tilt applied to the front (deg). Temples stay level: the rig counter-rotates them. */
+  tiltDeg: number;
+  /** Clearance solve of this frame (null when no spec is set or the pose is held). */
+  clearance: ClearanceResult | null;
   /** Bridge anchor in camera space (mm) and its projection (normalized). */
   bridgeAnchor: { point: Vec3; screen: { x: number; y: number } } | null;
   pd: PdEstimate;

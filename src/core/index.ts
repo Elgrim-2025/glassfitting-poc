@@ -11,7 +11,7 @@ export * from './fitting/scaleSolver';
 export * from './fitting/noseLanding';
 export * from './fitting/anchorSolver';
 export * from './fitting/kabschPose';
-export * from './fitting/templeSplay';
+export * from './fitting/clearance';
 export * from './filters/oneEuro';
 export * from './filters/poseFilter';
 export * from './tracking/angles';

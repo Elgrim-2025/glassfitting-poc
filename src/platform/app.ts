@@ -32,7 +32,7 @@ export class App {
   private startBtn: HTMLButtonElement;
 
   private core = new FittingCore();
-  private renderer: SceneRenderer;
+  readonly renderer: SceneRenderer;
   private overlay: LandmarkOverlay;
   private panel!: Panel;
   private camera: CameraSource;
@@ -57,7 +57,7 @@ export class App {
   private renderOpts: RenderOptions = { faceOccluder: true, headOccluder: true, debugOccluder: false };
   private overlayOpts: OverlayOptions = { landmarks: false, anchors: true };
   private lastFrame: FrameInput | null = null;
-  private lastOut: FitOutput | null = null;
+  lastOut: FitOutput | null = null;
   private lastPanelMs = 0;
   private busy = false;
 
@@ -93,6 +93,17 @@ export class App {
     }
     this.renderer.render(null, this.renderOpts);
     this.panel.setMessage('카메라를 시작하거나 데모 시퀀스를 로드하세요.');
+    // QA: ?replay=<url> loads a recorded/synthetic session (e.g. /bench/replays/wide_flat-yaw30.json) at start-up.
+    const replayUrl = new URLSearchParams(location.search).get('replay');
+    if (replayUrl) {
+      try {
+        const res = await fetch(replayUrl);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        this.loadReplay((await res.json()) as GoldenVector);
+      } catch (err) {
+        this.panel.setMessage(`replay 로드 실패 (${replayUrl}): ${err instanceof Error ? err.message : err}`, 'bad');
+      }
+    }
   }
 
   // ---- stage sizing --------------------------------------------------------
@@ -201,6 +212,9 @@ export class App {
       bridge_raw_x_px: rawScreen ? rawScreen.x * frame.imageWidth : null, bridge_raw_y_px: rawScreen ? rawScreen.y * frame.imageHeight : null,
       bridge_x_px: out.bridgeAnchor ? out.bridgeAnchor.screen.x * frame.imageWidth : null, bridge_y_px: out.bridgeAnchor ? out.bridgeAnchor.screen.y * frame.imageHeight : null,
       width_scale: out.widthScale, uniform_scale: out.uniformScale, splay_l_deg: (out.templeSplay.left * 180) / Math.PI, splay_r_deg: (out.templeSplay.right * 180) / Math.PI,
+      forward_mm: out.clearance?.forwardMm ?? null, vertex_mm: out.clearance?.vertexMm ?? null, pad_gap_mm: out.clearance?.padGapMm ?? null,
+      pen_temple: out.clearance?.penetration.temple ?? null, pen_brow: out.clearance?.penetration.brow ?? null,
+      pen_cheek: out.clearance?.penetration.cheek ?? null, pen_nose: out.clearance?.penetration.nose ?? null,
       pd_near: out.pd.pd_near, pd_far: out.pd.pd_far, pd_samples: out.pd.sample_count,
       detect_ms: detectMs, pipeline_ms: now - captureMs, fps: f.fps, matrix_tz_mm: out.rawFaceMatrix?.[14] ?? null,
     };
@@ -219,6 +233,7 @@ export class App {
       angles: out.angles, anglesFiltered: out.faceMatrix ? anglesFromMatrix(out.faceMatrix) : null,
       widthScale: out.widthScale, uniformScale: out.uniformScale, realSizeActive: out.realSizeActive,
       splayDeg: { left: (out.templeSplay.left * 180) / Math.PI, right: (out.templeSplay.right * 180) / Math.PI },
+      clearance: out.clearance,
       jitterRaw: jr, jitterFiltered: jf,
       latencyMs: this.latency.read().lagMs,
       trackingRatio: ts.trackingRatio, reacquireMs: ts.lastReacquireMs,

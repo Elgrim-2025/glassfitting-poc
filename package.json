@@ -5,7 +5,9 @@
   "type": "module",
   "description": "Web-based AI virtual glasses fitting PoC (MediaPipe Face Landmarker + Three.js)",
   "scripts": {
+    "predev": "node scripts/ensure-runtime-assets.mjs",
     "dev": "vite --host",
+    "prebuild": "node scripts/ensure-runtime-assets.mjs",
     "build": "vite build",
     "preview": "vite preview --host",
     "typecheck": "tsc --noEmit -p tsconfig.json",
@@ -15,6 +17,8 @@
     "setup:canonical": "node scripts/canonical-to-ts.mjs",
     "setup:frames": "node scripts/gen-frames.mjs",
     "setup": "npm run setup:models && npm run setup:canonical && npm run setup:frames",
+    "bench:replay": "rolldown scripts/bench-replay.ts --format esm --platform node -o bench/bench-replay.bundle.mjs && node bench/bench-replay.bundle.mjs",
+    "bench:fit": "rolldown scripts/fit-bench.ts --format esm --platform node -o bench/fit-bench.bundle.mjs && node bench/fit-bench.bundle.mjs",
     "postinstall": "node scripts/copy-wasm.mjs"
   },
   "dependencies": {

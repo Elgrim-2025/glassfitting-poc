@@ -85,23 +85,34 @@ components:
         bridge_mm: { type: number, example: 18 }
         temple_mm: { type: number, example: 140 }
         lens_height_mm: { type: number, example: 40 }
-        frame_width_mm: { type: number, description: 힌지–힌지 전체 폭, example: 138 }
+        frame_width_mm: { type: number, description: 엔드피스 바깥면 간 전체 폭, example: 148 }
         nose_pad: { type: string, enum: [fixed, adjustable] }
     Anchor:
       type: object
-      description: GLB 원점(브릿지 중심) 기준 앵커 좌표 (docs/assets/glb-spec.md)
+      description: GLB 원점(코 패드 접촉면 중심) 기준 앵커 좌표 (docs/assets/glb-spec.md)
       required: [bridge, temple_left, temple_right, nose_pad_offset]
       properties:
         bridge: { $ref: '#/components/schemas/Vec3' }
         temple_left: { $ref: '#/components/schemas/Vec3', description: −X 쪽 힌지 }
         temple_right: { $ref: '#/components/schemas/Vec3', description: +X 쪽 힌지 }
-        nose_pad_offset: { $ref: '#/components/schemas/Vec3' }
+        nose_pad_offset: { $ref: '#/components/schemas/Vec3', description: +X 코 패드의 접촉점 (x = 패드 중심 |x|, 0이면 스펙에서 유도; y; z = 접촉면 깊이). 착지 깊이는 이 점이 코 옆면에 닿도록 정한다 }
+        lens_plane_mm: { type: number, description: 렌즈 평면 z (mm, 기본 4). 클리어런스 솔버 메타 }
+        lens_back_mm: { type: number, description: 렌즈 광학 중심 뒷면 z (mm, 기본 lens_plane_mm − 1). 정점간 거리 기준 }
+        rim_depth_mm: { type: number, description: 렌즈 평면에서 림 뒷면까지 (mm, 기본 4) }
+        rim_back_mm: { type: number, description: 림 뒷면 z (mm, 기본 lens_plane_mm − rim_depth_mm) }
+        rim_width_mm: { type: number, description: 렌즈 가장자리에서 림 바깥면까지 폭 (mm, 기본 4) }
+        rim_outline_mm:
+          type: array
+          description: +X 림의 바깥 경계 폐곡선 ([x, y] mm, 프레임 좌표; −X 림은 거울상). 클리어런스 솔버가 림 뒷면 프로브로 쓴다. 없으면 렌즈 박스를 rim_width_mm 만큼 키운 둥근 사각형
+          items: { type: array, items: { type: number }, minItems: 2, maxItems: 2 }
+        temple_bend_mm: { type: number, description: 힌지에서 귀 굽힘 시작까지 다리 직선 길이 (mm, 기본 0.68·temple_mm) }
+        temple_drop_mm: { type: number, description: 굽힘 이후 다리 끝까지 내려가는 높이 (mm, 기본 28) }
     Frame:
       type: object
       required: [frame_id, name, spec, assets, version, updated_at]
       properties:
         frame_id: { type: string, example: FR-0001 }
-        name: { type: string, example: 샘플 사각 프레임 }
+        name: { type: string, example: 블랙 스퀘어 아세테이트 (웰링턴) }
         spec: { $ref: '#/components/schemas/FrameSpec' }
         assets:
           type: object
@@ -114,7 +125,7 @@ components:
           type: object
           properties:
             recommended_pd_range_mm: { type: array, items: { type: number }, minItems: 2, maxItems: 2 }
-            shape: { type: string, enum: [square, round, aviator], description: 절차적 대체 형상 힌트(선택) }
+            shape: { type: string, enum: [square, wellington, round, aviator], description: 절차적 대체 형상 힌트(선택) }
         version: { type: integer, example: 3 }
         updated_at: { type: string, format: date-time }
     FitSession:

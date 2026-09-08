@@ -33,9 +33,14 @@ export class GlassesRig {
   private templeR: THREE.Object3D | null = null;
   private hingeL = new THREE.Vector3();
   private hingeR = new THREE.Vector3();
+  /** Hinge positions in the asset frame (mm), for the head occluder's adaptive width. */
+  get hingeInfo(): { left: THREE.Vector3; right: THREE.Vector3 } | null {
+    return this.model ? { left: this.hingeL, right: this.hingeR } : null;
+  }
   private materials: { mat: THREE.Material; baseOpacity: number; baseTransparent: boolean }[] = [];
   private lastAlpha = -1;
   private lastSplay = { left: NaN, right: NaN };
+  private lastTilt = NaN;
   private loader: GLTFLoader;
   private loadToken = 0;
 
@@ -61,7 +66,7 @@ export class GlassesRig {
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
       console.warn('[glasses] GLB load failed, using procedural geometry:', error);
-      const p = buildProceduralGlasses(item.spec, inferShape(item));
+      const p = buildProceduralGlasses(item.spec, inferShape(item), item.assets.anchor);
       root = p.root;
       anchor = p.anchor;
       source = 'procedural';
@@ -139,7 +144,7 @@ export class GlassesRig {
     this.group.visible = true;
     this.group.matrix.fromArray(out.glassesMatrix);
     this.setAlpha(out.alpha);
-    this.applySplay(out.templeSplay.left, out.templeSplay.right);
+    this.applySplay(out.templeSplay.left, out.templeSplay.right, (out.tiltDeg * Math.PI) / 180);
   }
 
   private setAlpha(alpha: number): void {
@@ -152,13 +157,20 @@ export class GlassesRig {
     }
   }
 
-  private applySplay(left: number, right: number): void {
-    if (left === this.lastSplay.left && right === this.lastSplay.right) return;
+  /**
+   * Temple node matrix = T(hinge) · Rx(−tilt) · Ry(±splay) · T(−hinge): the front carries the
+   * pantoscopic tilt, so the temples are rotated back by −tilt about the hinge to stay level
+   * along the head, then splayed outward about the (level) vertical axis.
+   */
+  private applySplay(left: number, right: number, tiltRad = 0): void {
+    if (left === this.lastSplay.left && right === this.lastSplay.right && tiltRad === this.lastTilt) return;
     this.lastSplay = { left, right };
+    this.lastTilt = tiltRad;
     const pivot = (node: THREE.Object3D | null, hinge: THREE.Vector3, angle: number) => {
       if (!node) return;
       node.matrix
         .makeTranslation(hinge.x, hinge.y, hinge.z)
+        .multiply(new THREE.Matrix4().makeRotationX(-tiltRad))
         .multiply(new THREE.Matrix4().makeRotationY(angle))
         .multiply(new THREE.Matrix4().makeTranslation(-hinge.x, -hinge.y, -hinge.z));
     };
