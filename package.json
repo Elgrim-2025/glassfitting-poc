@@ -15,6 +15,7 @@
     "setup:canonical": "node scripts/canonical-to-ts.mjs",
     "setup:frames": "node scripts/gen-frames.mjs",
     "setup": "npm run setup:models && npm run setup:canonical && npm run setup:frames",
+    "bench:fit": "rolldown scripts/fit-bench.ts --format esm --platform node -o bench/fit-bench.bundle.mjs && node bench/fit-bench.bundle.mjs",
     "postinstall": "node scripts/copy-wasm.mjs"
   },
   "dependencies": {
