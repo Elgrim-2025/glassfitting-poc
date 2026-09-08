@@ -5,7 +5,9 @@
   "type": "module",
   "description": "Web-based AI virtual glasses fitting PoC (MediaPipe Face Landmarker + Three.js)",
   "scripts": {
+    "predev": "node scripts/ensure-runtime-assets.mjs",
     "dev": "vite --host",
+    "prebuild": "node scripts/ensure-runtime-assets.mjs",
     "build": "vite build",
     "preview": "vite preview --host",
     "typecheck": "tsc --noEmit -p tsconfig.json",

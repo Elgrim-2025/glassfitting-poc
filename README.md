@@ -17,6 +17,8 @@ npm run bench:fit    # 얼굴 변형 14종 × 포즈 5종 × 프레임 3종 피�
 
 샘플 안경 3종과 머리 오클루더는 Blender(5.x)로 생성한다(`scripts/blender/`, 규격은 [docs/assets/glb-spec.md](docs/assets/glb-spec.md)). Blender가 없으면 `NO_BLENDER=1 npm run setup:frames`로 절차적 폴백을 만든다(외관 평가용 아님).
 
+`npm run dev`/`npm run build`는 시작 전에 `scripts/ensure-runtime-assets.mjs`로 git에 없는 런타임 파일(`public/wasm`, `public/draco`, `public/models/face_landmarker.task`)을 채운다. 새 클론이나 **git worktree**에서 이 파일이 없으면 트래커가 `vision_wasm_internal.js … 404`, `GPU delegate failed`로 실패하므로, 그 경우 `npm run setup` 또는 `node scripts/ensure-runtime-assets.mjs`를 실행한다(HUD에도 누락 파일 경로가 표시된다).
+
 모바일 실기기 테스트는 HTTPS가 필요하다. 로컬 인증서(mkcert 등)를 만든 뒤 `vite.config.ts`의 `server.https`에 지정하거나, 빌드 결과를 HTTPS 정적 호스팅에 올린다. iOS Safari는 사용자 탭으로만 카메라를 시작한다(화면의 "카메라 시작" 버튼).
 
 카메라 없이 확인하려면 HUD의 **데모 시퀀스 로드**(합성 얼굴 40프레임 재생) 또는 녹화 JSON 파일 로드를 사용한다.
