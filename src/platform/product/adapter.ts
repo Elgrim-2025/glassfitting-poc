@@ -6,7 +6,7 @@ export interface ProductFrame {
   name: string;
   spec: FrameSpec;
   assets: { glb_url: string; thumbnail_url: string; anchor: AssetAnchor };
-  fit_hints?: { recommended_pd_range_mm: [number, number]; shape?: 'square' | 'round' | 'aviator' };
+  fit_hints?: { recommended_pd_range_mm: [number, number]; shape?: 'square' | 'round' | 'aviator' | 'wellington' };
   version: number;
   updated_at: string;
 }
@@ -55,7 +55,7 @@ export class ProductAdapter {
   }
 }
 
-export function inferShape(item: ProductFrame): 'square' | 'round' | 'aviator' {
+export function inferShape(item: ProductFrame): 'square' | 'round' | 'aviator' | 'wellington' {
   if (item.fit_hints?.shape) return item.fit_hints.shape;
   const n = item.name.toLowerCase();
   if (n.includes('라운드') || n.includes('round')) return 'round';

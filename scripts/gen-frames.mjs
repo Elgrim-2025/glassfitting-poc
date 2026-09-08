@@ -6,7 +6,7 @@
 //   BLENDER=/path/to/blender ...           override the Blender binary
 //
 // Product definitions live in scripts/frames.json (see scripts/lib/frame-defs.mjs).
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -181,7 +181,7 @@ function postprocess(path, def, source) {
 const thumbnailSvg = (def) => {
   const { lens_width_mm: lw, bridge_mm: b, lens_height_mm: lh } = def.spec;
   const c = `rgb(${def.color.map((v) => Math.round(v * 255)).join(',')})`;
-  const rx = def.shape === 'round' ? lw / 2 : 6;
+  const rx = def.shape === 'round' ? lw / 2 : def.shape === 'wellington' ? 8 : 6;
   const lens = (x) => `<rect x="${x}" y="${30 - lh / 2}" width="${lw}" height="${lh}" rx="${rx}" fill="none" stroke="${c}" stroke-width="3"/>`;
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-80 0 160 60">${lens(-b / 2 - lw)}${lens(b / 2)}<line x1="${-b / 2}" y1="24" x2="${b / 2}" y2="24" stroke="${c}" stroke-width="3"/></svg>`;
 };
@@ -189,18 +189,61 @@ const thumbnailSvg = (def) => {
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
+/** Max distance from a builder outline point to the JS outline polyline (mm). */
+function outlineDeviation(builderPts, jsPts) {
+  const segDist = (p, a, b) => {
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    const l2 = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2));
+    return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
+  };
+  let worst = 0;
+  for (const p of builderPts) {
+    let best = Infinity;
+    for (let i = 0; i < jsPts.length; i++) best = Math.min(best, segDist(p, jsPts[i], jsPts[(i + 1) % jsPts.length]));
+    worst = Math.max(worst, best);
+  }
+  return worst;
+}
+
+/** Removes GLB/SVG/JSON of frames no longer defined so the mock API only serves the current product(s). */
+function removeStaleAssets() {
+  const ids = new Set(FRAMES.map((d) => d.frame_id));
+  for (const [dir, re] of [[assetDir, /^(FR-\d+)\.(glb|svg)$/], [join(apiDir, 'frames'), /^(FR-\d+)\.json$/]]) {
+    if (!existsSync(dir)) continue;
+    for (const f of readdirSync(dir)) {
+      const m = f.match(re);
+      if (m && !ids.has(m[1])) { rmSync(join(dir, f)); console.log(`[gen-frames] removed stale ${join(dir, f)}`); }
+    }
+  }
+}
+
 const blender = findBlender();
 let source = 'procedural';
+const reportPath = join(root, 'bench', 'frame-report.json');
+mkdirSync(join(root, 'bench'), { recursive: true });
 if (blender) {
   console.log(`[gen-frames] Blender: ${blender}`);
-  runBlender(blender, 'frame_builder.py', ['--frames', FRAMES_JSON, '--out', assetDir]);
+  runBlender(blender, 'frame_builder.py', ['--frames', FRAMES_JSON, '--out', assetDir, '--report', reportPath]);
   runBlender(blender, 'head_builder.py', ['--face', join(modelDir, 'canonical_face_model.obj'), '--out', join(modelDir, 'head_occluder.glb')]);
   source = 'blender';
+  // The runtime clearance solver probes the JS-derived rim outline: it must match what Blender modelled.
+  const reports = JSON.parse(readFileSync(reportPath, 'utf8'));
+  for (const def of FRAMES) {
+    const rep = reports.find((r) => r.frame_id === def.frame_id);
+    const anchor = anchorFromDef(def);
+    const dev = outlineDeviation(rep.rim_outline_mm, anchor.rim_outline_mm);
+    const backErr = Math.abs(rep.rim_back_mm - anchor.rim_back_mm), lensErr = Math.abs(rep.lens_back_mm - anchor.lens_back_mm);
+    const padErr = Math.hypot(...rep.pad_contact.map((v, k) => v - anchor.nose_pad_offset[k]));
+    console.log(`[gen-frames] ${def.frame_id}: rim outline Blender↔API deviation ${dev.toFixed(2)} mm, rim back ${rep.rim_back_mm}/${anchor.rim_back_mm}, lens back ${rep.lens_back_mm}/${anchor.lens_back_mm}, pad contact err ${padErr.toFixed(2)}`);
+    if (dev > 0.6 || backErr > 0.05 || lensErr > 0.1 || padErr > 0.05) throw new Error(`${def.frame_id}: Blender geometry disagrees with the API anchor (outline ${dev.toFixed(2)} mm, rim back ${backErr.toFixed(2)}, lens back ${lensErr.toFixed(2)}, pad ${padErr.toFixed(2)})`);
+  }
 } else {
   console.log('[gen-frames] Blender not found (set BLENDER=/path or install it) — writing procedural fallback geometry');
   for (const def of FRAMES) writeProceduralGlb(join(assetDir, `${def.frame_id}.glb`), def);
 }
 
+removeStaleAssets();
 const items = [];
 for (const def of FRAMES) {
   const glbPath = join(assetDir, `${def.frame_id}.glb`);

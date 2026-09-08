@@ -15,7 +15,7 @@ import type { FrameInput } from '../src/core/types';
 
 const OUT_DIR = resolve(process.cwd(), 'bench', 'replays');
 const POSES: Record<string, Partial<SyntheticPose>> = { front: {}, yaw30: { yawDeg: 30 }, 'yaw-30': { yawDeg: -30 }, pitch15: { pitchDeg: 15 } };
-const VARIANTS = new Set(['canonical', 'wide_flat', 'narrow_high', 'extreme']);
+const VARIANTS = new Set(['canonical', 'flat', 'wide_flat', 'narrow_high', 'extreme']);
 const FRAMES = 40;
 
 mkdirSync(OUT_DIR, { recursive: true });

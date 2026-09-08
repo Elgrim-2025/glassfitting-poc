@@ -140,8 +140,9 @@ export const downloadJson = (filename: string, data: unknown): void => downloadT
  * One per-frame metrics row (built in App.updateMeters; column order = key order). Columns:
  * t_ms, state, alpha, confidence, yaw/pitch/roll_raw, yaw/pitch/roll_f, bridge_raw_x/y_px, bridge_x/y_px,
  * width_scale, uniform_scale, splay_l_deg, splay_r_deg,
- * forward_mm, pen_temple, pen_brow, pen_cheek, pen_nose (clearance solve: forward push and residual
- *   penetration in mm; null without a frame spec, blank in CSV when no probe is near that region),
+ * forward_mm, vertex_mm, pad_gap_mm, pen_temple, pen_brow, pen_cheek, pen_nose (clearance solve: forward push,
+ *   vertex distance, pad gap and residual penetration in mm; null without a frame spec, blank in CSV when no
+ *   probe is near that region),
  * pd_near, pd_far, pd_samples, detect_ms, pipeline_ms, fps, matrix_tz_mm.
  */
 export type MetricRow = Record<string, number | string | null>;

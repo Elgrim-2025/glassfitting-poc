@@ -12,7 +12,8 @@ Two face meshes are judged per case:
   true   — the deformed face geometry: how far the fit is from physical contact (reported,
            not a pass criterion — the runtime never sees the true depth).
 Pass criteria on the metric mesh (mm, negative = inside the skin):
-  temples ≥ −0.5   rims (frame_front) ≥ −0.5   lenses ≥ 0   nose pads ≥ −1.5 (pads press the skin)
+  temples ≥ −0.5   rims (frame_front) ≥ −3.0 (the inner rim may sink noseSinkMm = 2 into the nose flank)
+  lenses ≥ 0   nose pads ≥ −2.0 (pads press the skin)
 Temple vertices behind the ear landmarks (z < −25) are not judged: the face shell ends there.
 
 Usage (headless):
@@ -28,7 +29,9 @@ import sys
 import mathutils
 from mathutils import Euler, Matrix, Vector
 
-TOLERANCE = {'temple_L': -0.5, 'temple_R': -0.5, 'frame_front': -0.5, 'lens_L': 0.0, 'lens_R': 0.0, 'nose_pads': -1.5}
+# frame_front may sink noseSinkMm (2) into the nose flank by design (+1 slack: the vertex cap can hold the
+# frame back on prominent noses); pads sink padSinkMm (1) (+1 slack).
+TOLERANCE = {'temple_L': -0.5, 'temple_R': -0.5, 'frame_front': -3.0, 'lens_L': 0.0, 'lens_R': 0.0, 'nose_pads': -2.0}
 # Only vertices in front of the face-mesh boundary can be judged against an open face shell.
 JUDGE_MIN_Z = -25.0
 

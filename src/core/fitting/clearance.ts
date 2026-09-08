@@ -1,16 +1,16 @@
 /**
- * Face clearance solver (spec §4.3). Keeps the temples, rims and nose pads out of
- * the user's face with two degrees of freedom — an outward temple splay about each
- * hinge and a forward (+Z) push of the whole frame — and reports the residual
- * penetration per region so the HUD and the bench can see what is left.
+ * Face clearance solver (spec §4.3). Keeps the temples, rims, bridge bar and nose pads
+ * out of the user's face with two degrees of freedom — an outward temple splay about
+ * each hinge and a forward (+Z) push of the whole frame — and reports the residual
+ * penetration per region, the resulting vertex distance and the pad gap so the HUD and
+ * the bench can see what is left.
  *
  * Everything is in the face-local frame (mm): +X = image-right (the "R" side; "L" is
  * −X as everywhere in the core), +Y up, +Z toward the camera; temples run toward −Z.
  *
- * Regions are computed from CANONICAL_VERTICES_MM at module load with geometric
- * predicates (no hand-typed index lists). The solver reads those indices out of the
- * *user's* face-local points (screen-exact xy, canonical depth), so a wider or taller
- * face moves the probes to where the real face is.
+ * Face surfaces are the region height fields of `faceSurface.ts` (canonical triangles
+ * over the user's points), so a wider, taller or flatter face moves the probes to where
+ * the real face is.
  *
  * Temple: over the side band at arm height (|p.y − armY(p.z)| ≤ 15 mm, at least 3 mm
  * behind the hinge) the arm centreline must clear each vertex by templeMm:
@@ -18,21 +18,28 @@
  * The arm height follows the temple profile: hinge height until temple_bend_mm, then a
  * linear drop of temple_drop_mm to the tip at temple_mm — evaluated after the tilt.
  *
- * Rims and pads: probes on the rim back face (24 points along the rounded-rectangle
- * outline of each lens at z = lens_plane − rim_depth) and at the nose-pad centres are
- * compared with the region heightfield z(x, y) (3 nearest region vertices in xy,
- * inverse-distance weighted): push = max(z_face − z_probe + margin) with margin = rimMm
- * for rims and −padSinkMm for pads, clamped to 0..maxForwardMm and added to the anchor z.
- *
- * `penetration` is measured after the correction and without the safety margins:
- * positive means the arm centreline / rim back face is inside the face surface (for
- * pads: sunk deeper than padSinkMm). A healthy fit has all four ≤ 0; a region with no
- * probe in reach reports −Infinity.
+ * Forward push: probes on the rim back face (the product's rim outline, 24 points per
+ * lens, or a rounded rectangle grown by the rim width when the asset has no outline),
+ * on the bridge bar and at the pad contact faces are compared with the brow, cheek and
+ * nose height fields:
+ *   rims vs brow/cheek: push ≥ z_face − z_probe + rimMm
+ *   rims vs nose:       push ≥ z_face − z_probe + rimMm − noseSinkMm   (the inner rim may sink a little)
+ *   bridge bar vs nose: push ≥ z_face − z_probe + bridgeMm
+ *   pads vs nose:       push ≥ z_face − z_probe − padSinkMm
+ * The push is then clamped so that the vertex distance (lens back → corneal apex, from
+ * the eyelid landmarks) stays within [vertexMinMm, vertexMaxMm] and |push| ≤ maxForwardMm.
+ * `penetration` is measured after the correction, beyond the allowances (padSinkMm,
+ * noseSinkMm) and without the safety margins: positive means a part is still inside the
+ * face surface. A healthy fit has all four ≤ 0; a region with no probe in reach reports −Infinity.
  */
-import { CANONICAL_VERTEX_COUNT, CANONICAL_VERTICES_MM } from './canonical';
 import type { GlassesScale } from './anchorSolver';
+import { BROW_TRIS, CHEEK_L_TRIS, CHEEK_R_TRIS, NOSE_TRIS, surfaceZ } from './faceSurface';
+import { CANONICAL_VERTEX_COUNT, CANONICAL_VERTICES_MM } from './canonical';
+import { padContactPoint } from './noseLanding';
 import type { Vec3 } from '../math/vec3';
 import type { AssetAnchor, ClearanceConfig, ClearanceResult, FrameSpec } from '../types';
+
+export { ADJUSTABLE_PAD_MIN_X_MM, padHalfSpacing } from './noseLanding';
 
 export interface HingeGeometry {
   /** Hinge half-width (mm) from the GLB origin, i.e. |temple_x|. */
@@ -52,6 +59,8 @@ export interface ClearanceInput {
   asset?: AssetAnchor | null;
   scale?: GlassesScale;
   tiltDeg?: number;
+  /** Required gap between the bridge bar and the nose ridge (mm, default 1). */
+  bridgeMm?: number;
   cfg: ClearanceConfig;
 }
 
@@ -62,6 +71,8 @@ export const DEFAULT_RIM_WIDTH_MM = 4;
 export const DEFAULT_TEMPLE_BEND_RATIO = 0.68;
 export const DEFAULT_TEMPLE_DROP_MM = 28;
 export const DEFAULT_NOSE_PAD_OFFSET: Vec3 = [0, -4, -2];
+/** Lens back surface sits this far behind the lens plane by default (mm). */
+export const DEFAULT_LENS_THICKNESS_MM = 1;
 
 // ---- solver constants ---------------------------------------------------------
 /** Half-height of the band around the arm in which side vertices constrain the splay (mm). */
@@ -71,18 +82,16 @@ export const MIN_HINGE_DEPTH_MM = 3;
 export const RIM_PROBES_PER_LENS = 24;
 /** Lens centre height below the bridge origin (mm), matching the frame builder. */
 export const LENS_CENTER_Y_MM = -3;
-/** Lens corner radius as a fraction of the lens height. */
+/** Lens corner radius as a fraction of the lens height (default outline only). */
 export const LENS_CORNER_RATIO = 0.25;
-/** A probe farther than this (xy) from the nearest region vertex is not over that region. */
+/** A probe farther than this (xy) from the nearest region vertex is not over that region (heightAt only). */
 export const REGION_REACH_MM = 12;
-/** Adjustable pads sit on arms behind the rims: centre |x| = max(ADJUSTABLE_PAD_MIN_X_MM, bridge/2 − 1). */
-export const ADJUSTABLE_PAD_MIN_X_MM = 8;
+/** Corneal apex sits this far in front of the eyelid landmarks (mm). */
+export const CORNEA_BULGE_MM = 1.5;
+/** Eyelid landmarks whose mean depth locates the eye surface. */
+export const EYELIDS: readonly number[] = [159, 145, 386, 374];
 
-/** Nose-pad centre |x| for a spec (fixed pads: bridge/2 − 1; adjustable: see ADJUSTABLE_PAD_MIN_X_MM). */
-export const padHalfSpacing = (spec: FrameSpec): number =>
-  spec.nose_pad === 'adjustable' ? Math.max(ADJUSTABLE_PAD_MIN_X_MM, spec.bridge_mm / 2 - 1) : spec.bridge_mm / 2 - 1;
-
-// ---- regions (computed once from the canonical geometry) -----------------------
+// ---- regions (vertex sets, computed once from the canonical geometry) --------------
 const selectVertices = (pred: (x: number, y: number, z: number) => boolean): number[] => {
   const out: number[] = [];
   for (let i = 0; i < CANONICAL_VERTEX_COUNT; i++) {
@@ -162,44 +171,82 @@ export function roundedRectOutline(cx: number, cy: number, hw: number, hh: numbe
   return out;
 }
 
-/**
- * Rim back-face probes in face-local mm: the rounded-rectangle outline of each lens
- * (centre x = ±(bridge/2 + lens_width/2), y = LENS_CENTER_Y_MM, corner radius
- * 0.25·lens_height) grown outward by the rim width — so the rim's inner face next to the
- * nose is covered — at z = lens_plane − rim_depth, then tilted, scaled and anchored.
- */
-export function rimProbes(spec: FrameSpec, asset: AssetAnchor | null | undefined, anchorLocal: Vec3, scale: GlassesScale, tiltDeg: number): Vec3[] {
-  const pl = placementOf(asset, scale, tiltDeg, anchorLocal);
-  const zr = (asset?.lens_plane_mm ?? DEFAULT_LENS_PLANE_MM) - (asset?.rim_depth_mm ?? DEFAULT_RIM_DEPTH_MM);
-  const rw = asset?.rim_width_mm ?? DEFAULT_RIM_WIDTH_MM;
-  const hw = spec.lens_width_mm / 2 + rw, hh = spec.lens_height_mm / 2 + rw;
-  const cx = spec.bridge_mm / 2 + spec.lens_width_mm / 2;
-  const out: Vec3[] = [];
-  for (const sign of [-1, 1]) {
-    for (const [x, y] of roundedRectOutline(sign * cx, LENS_CENTER_Y_MM, hw, hh, LENS_CORNER_RATIO * spec.lens_height_mm + rw, RIM_PROBES_PER_LENS)) {
-      out.push(toFaceLocal(pl, [x, y, zr]));
+/** `n` points spaced evenly along a closed polyline. */
+export function resampleClosed(pts: readonly [number, number][], n: number): [number, number][] {
+  const m = pts.length;
+  if (m === 0) return [];
+  const seg: number[] = [];
+  let total = 0;
+  for (let i = 0; i < m; i++) {
+    const a = pts[i], b = pts[(i + 1) % m];
+    const d = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    seg.push(d);
+    total += d;
+  }
+  if (total === 0) return Array.from({ length: n }, () => [pts[0][0], pts[0][1]]);
+  const out: [number, number][] = [];
+  let i = 0, acc = 0;
+  for (let k = 0; k < n; k++) {
+    const target = (k * total) / n;
+    while (acc + seg[i] < target - 1e-9) {
+      acc += seg[i];
+      i = (i + 1) % m;
     }
+    const t = seg[i] === 0 ? 0 : (target - acc) / seg[i];
+    const a = pts[i], b = pts[(i + 1) % m];
+    out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
   }
   return out;
 }
 
-/** Bridge-bar probes: 5 points between the lenses at 30 % of the lens height, 1 mm behind the lens plane. */
+/** Rim back-face z in frame coordinates (mm). */
+export const rimBackZ = (asset: AssetAnchor | null | undefined): number =>
+  asset?.rim_back_mm ?? (asset?.lens_plane_mm ?? DEFAULT_LENS_PLANE_MM) - (asset?.rim_depth_mm ?? DEFAULT_RIM_DEPTH_MM);
+
+/** Lens back-surface z in frame coordinates (mm). */
+export const lensBackZ = (asset: AssetAnchor | null | undefined): number =>
+  asset?.lens_back_mm ?? (asset?.lens_plane_mm ?? DEFAULT_LENS_PLANE_MM) - DEFAULT_LENS_THICKNESS_MM;
+
+/**
+ * Rim back-face probes in face-local mm: the product's rim outline (+X lens, mirrored for
+ * −X) when the asset carries one, otherwise the rounded-rectangle outline of each lens
+ * (centre x = ±(bridge/2 + lens_width/2), y = LENS_CENTER_Y_MM, corner radius
+ * 0.25·lens_height) grown outward by the rim width; at the rim back z, then tilted,
+ * scaled and anchored.
+ */
+export function rimProbes(spec: FrameSpec, asset: AssetAnchor | null | undefined, anchorLocal: Vec3, scale: GlassesScale, tiltDeg: number): Vec3[] {
+  const pl = placementOf(asset, scale, tiltDeg, anchorLocal);
+  const zr = rimBackZ(asset);
+  let outline: [number, number][];
+  if (asset?.rim_outline_mm && asset.rim_outline_mm.length >= 3) {
+    outline = resampleClosed(asset.rim_outline_mm, RIM_PROBES_PER_LENS);
+  } else {
+    const rw = asset?.rim_width_mm ?? DEFAULT_RIM_WIDTH_MM;
+    const hw = spec.lens_width_mm / 2 + rw, hh = spec.lens_height_mm / 2 + rw;
+    const cx = spec.bridge_mm / 2 + spec.lens_width_mm / 2;
+    outline = roundedRectOutline(cx, LENS_CENTER_Y_MM, hw, hh, LENS_CORNER_RATIO * spec.lens_height_mm + rw, RIM_PROBES_PER_LENS);
+  }
+  const out: Vec3[] = [];
+  for (const sign of [-1, 1]) for (const [x, y] of outline) out.push(toFaceLocal(pl, [sign * x, y, zr]));
+  return out;
+}
+
+/** Bridge-bar probes: 5 points between the lenses at 30 % of the lens height, on the rim back face. */
 export function bridgeProbes(spec: FrameSpec, asset: AssetAnchor | null | undefined, anchorLocal: Vec3, scale: GlassesScale, tiltDeg: number): Vec3[] {
   const pl = placementOf(asset, scale, tiltDeg, anchorLocal);
   const y = LENS_CENTER_Y_MM + 0.3 * spec.lens_height_mm;
-  const z = (asset?.lens_plane_mm ?? DEFAULT_LENS_PLANE_MM) - 1;
+  const z = rimBackZ(asset);
   const half = spec.bridge_mm / 2;
   const out: Vec3[] = [];
   for (let k = 0; k < 5; k++) out.push(toFaceLocal(pl, [-half + (2 * half * k) / 4, y, z]));
   return out;
 }
 
-/** Nose-pad centre probes in face-local mm (x = ±padHalfSpacing). */
+/** Nose-pad contact probes in face-local mm (x = ±pad contact x). */
 export function padProbes(spec: FrameSpec, asset: AssetAnchor | null | undefined, anchorLocal: Vec3, scale: GlassesScale, tiltDeg: number): Vec3[] {
   const pl = placementOf(asset, scale, tiltDeg, anchorLocal);
-  const off = asset?.nose_pad_offset ?? DEFAULT_NOSE_PAD_OFFSET;
-  const px = padHalfSpacing(spec);
-  return [toFaceLocal(pl, [-px, off[1], off[2]]), toFaceLocal(pl, [px, off[1], off[2]])];
+  const pad = padContactPoint(spec, asset);
+  return [toFaceLocal(pl, [-pad[0], pad[1], pad[2]]), toFaceLocal(pl, [pad[0], pad[1], pad[2]])];
 }
 
 /**
@@ -236,7 +283,8 @@ export function armHeightAt(arm: readonly Vec3[], z: number): number {
 
 /**
  * Face surface height z(x, y) from the 3 nearest region vertices in xy (inverse-distance
- * weighted), or null when the nearest vertex is farther than `reach`.
+ * weighted), or null when the nearest vertex is farther than `reach`. Kept for tools and
+ * tests; the solver uses the triangle height fields of faceSurface.ts.
  */
 export function heightAt(V: ArrayLike<number>, region: readonly number[], x: number, y: number, reach = REGION_REACH_MM): number | null {
   let d0 = Infinity, d1 = Infinity, d2 = Infinity;
@@ -253,6 +301,13 @@ export function heightAt(V: ArrayLike<number>, region: readonly number[], x: num
   const eps = 1e-3;
   const w0 = 1 / (d0 + eps), w1 = Number.isFinite(d1) ? 1 / (d1 + eps) : 0, w2 = Number.isFinite(d2) ? 1 / (d2 + eps) : 0;
   return (z0 * w0 + z1 * w1 + z2 * w2) / (w0 + w1 + w2);
+}
+
+/** Corneal apex depth (face-local z) from the eyelid landmarks. */
+export function corneaZ(V: ArrayLike<number>): number {
+  let s = 0;
+  for (const i of EYELIDS) s += V[i * 3 + 2];
+  return s / EYELIDS.length + CORNEA_BULGE_MM;
 }
 
 // ---- solver -----------------------------------------------------------------------
@@ -294,49 +349,68 @@ export function solveClearance(input: ClearanceInput): ClearanceResult {
   const asset = input.asset ?? null;
   const scale = input.scale ?? { uniform: 1, width: 1 };
   const tiltDeg = input.tiltDeg ?? 0;
+  const bridgeMm = input.bridgeMm ?? 1;
   const anchor0 = input.anchorLocal;
 
-  // 1. Forward push from the rim back face and the pad centres against the front heightfields.
-  const rims = [...rimProbes(spec, asset, anchor0, scale, tiltDeg), ...bridgeProbes(spec, asset, anchor0, scale, tiltDeg)];
-  const pads = padProbes(spec, asset, anchor0, scale, tiltDeg);
-  type Hit = { gap: number };
-  const brow: Hit[] = [], cheek: Hit[] = [], nose: Hit[] = [];
+  // 1. Forward push from the rim back face, the bridge bar and the pad contact faces.
+  //    `gap` = how far the probe sits inside the face surface (mm), beyond its allowance.
+  const brow: number[] = [], cheek: number[] = [], nose: number[] = [];
   let push = 0;
-  for (const p of rims) {
-    const cheekRegion = p[0] < 0 ? CHEEK_L : CHEEK_R;
-    const noseRegion = p[0] < 0 ? NOSE_L : NOSE_R;
-    for (const [region, hits] of [[BROW, brow], [cheekRegion, cheek], [noseRegion, nose]] as const) {
-      const zf = heightAt(V, region, p[0], p[1]);
-      if (zf === null) continue;
-      const gap = zf - p[2];
-      hits.push({ gap });
-      push = Math.max(push, gap + cfg.rimMm);
-    }
+  for (const p of rimProbes(spec, asset, anchor0, scale, tiltDeg)) {
+    const cheekTris = p[0] < 0 ? CHEEK_L_TRIS : CHEEK_R_TRIS;
+    const zb = surfaceZ(V, BROW_TRIS, p[0], p[1]);
+    if (zb !== null) { const g = zb - p[2]; brow.push(g); push = Math.max(push, g + cfg.rimMm); }
+    const zc = surfaceZ(V, cheekTris, p[0], p[1]);
+    if (zc !== null) { const g = zc - p[2]; cheek.push(g); push = Math.max(push, g + cfg.rimMm); }
+    const zn = surfaceZ(V, NOSE_TRIS, p[0], p[1]);
+    if (zn !== null) { const g = zn - p[2] - cfg.noseSinkMm; nose.push(g); push = Math.max(push, g + cfg.rimMm); }
   }
-  const padHits: Hit[] = [];
-  for (const p of pads) {
-    const zf = heightAt(V, p[0] < 0 ? NOSE_L : NOSE_R, p[0], p[1]);
-    if (zf === null) continue;
-    const gap = zf - p[2] - cfg.padSinkMm;
-    padHits.push({ gap });
-    push = Math.max(push, gap);
+  for (const p of bridgeProbes(spec, asset, anchor0, scale, tiltDeg)) {
+    const zn = surfaceZ(V, NOSE_TRIS, p[0], p[1]);
+    if (zn !== null) { const g = zn - p[2]; nose.push(g); push = Math.max(push, g + bridgeMm); }
   }
-  const forwardMm = clamp(push, 0, cfg.maxForwardMm);
-  const residual = (hits: Hit[]) => hits.reduce((m, h) => Math.max(m, h.gap - forwardMm), -Infinity);
+  const pads = padProbes(spec, asset, anchor0, scale, tiltDeg);
+  const padSurface: (number | null)[] = pads.map((p) => surfaceZ(V, NOSE_TRIS, p[0], p[1]));
+  pads.forEach((p, k) => {
+    const zf = padSurface[k];
+    if (zf === null) return;
+    const g = zf - p[2] - cfg.padSinkMm;
+    nose.push(g);
+    push = Math.max(push, g);
+  });
 
-  // 2. Temple splay about the pushed hinge position.
-  const anchor: Vec3 = [anchor0[0], anchor0[1], anchor0[2] + forwardMm];
+  // 2. Vertex-distance clamp: lens back (tilted, scaled) → corneal apex within [min, max].
+  const pl = placementOf(asset, scale, tiltDeg, anchor0);
+  const lensBackOffset = LENS_CENTER_Y_MM * pl.sy * pl.sin + lensBackZ(asset) * pl.sy * pl.cos;
+  const cornea = corneaZ(V);
+  const zMin = cornea + cfg.vertexMinMm - lensBackOffset;
+  const zMax = cornea + cfg.vertexMaxMm - lensBackOffset;
+  let forward = Math.max(push, zMin - anchor0[2]);
+  forward = Math.min(forward, zMax - anchor0[2]);
+  forward = clamp(forward, -cfg.maxForwardMm, cfg.maxForwardMm);
+  const residual = (gaps: number[]) => gaps.reduce((m, g) => Math.max(m, g - forward), -Infinity);
+  const vertexMm = anchor0[2] + forward + lensBackOffset - cornea;
+  let padGap = Infinity;
+  pads.forEach((p, k) => {
+    const zf = padSurface[k];
+    if (zf !== null) padGap = Math.min(padGap, p[2] + forward - zf);
+  });
+
+  // 3. Temple splay about the pushed hinge position.
+  const anchor: Vec3 = [anchor0[0], anchor0[1], anchor0[2] + forward];
   const left = solveSide(sideConstraints(V, SIDE_L, templeArm(-1, spec, hinge, asset, anchor, scale, tiltDeg)), cfg);
   const right = solveSide(sideConstraints(V, SIDE_R, templeArm(1, spec, hinge, asset, anchor, scale, tiltDeg)), cfg);
 
   return {
     splay: { left: left.splay, right: right.splay },
-    forwardMm,
+    forwardMm: forward,
     penetration: {
       temple: Math.max(left.penetration, right.penetration),
       brow: residual(brow),
       cheek: residual(cheek),
-      nose: Math.max(residual(nose), residual(padHits)),
+      nose: residual(nose),
     },
+    vertexMm,
+    padGapMm: padGap,
   };
 }

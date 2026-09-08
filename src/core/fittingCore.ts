@@ -123,7 +123,7 @@ export class FittingCore {
         rawFace = estimatePoseKabsch(pts).matrix;
         plausible = isPlausibleFaceMatrix(rawFace);
       }
-      metric = toMetricLandmarks(lm, rawFace!, cam, cfg.placement.depthSource === 'landmark' ? 'landmark' : 'matrix', this.metricBuf);
+      metric = toMetricLandmarks(lm, rawFace!, cam, cfg.placement.depthSource === 'canonical' ? 'matrix' : cfg.placement.depthSource, this.metricBuf);
       angles = anglesFromMatrix(rawFace!);
       const faceWidthPx = Math.hypot(
         (lm[LM.TEMPLE_L].x - lm[LM.TEMPLE_R].x) * frame.imageWidth,
@@ -160,15 +160,16 @@ export class FittingCore {
         widthScale = cfg.placement.widthScaleEnabled ? smoothWidth : 1;
       }
 
-      // Nose landing (filtered) → clearance (forward push on the anchor) → matrix with tilt → filtered splay/push.
-      anchorLocal = this.anchorFilter.filter(solveNoseLanding(metric!, rawFace!, this.spec, cfg.placement).anchor, frame.timestampMs, st.filterStrength);
+      // Nose landing on the pads (filtered) → clearance (forward push / vertex clamp) → matrix with tilt → filtered splay/push.
       const scale = { uniform: uniformScale, width: widthScale };
+      const landing = solveNoseLanding(metric!, rawFace!, this.spec, cfg.placement, this.asset, scale, cfg.placement.pantoscopicTiltDeg);
+      anchorLocal = this.anchorFilter.filter(landing.anchor, frame.timestampMs, st.filterStrength);
       const hinge = this.hingeGeometry();
       if (this.spec && hinge) {
         const local = mTransformPoints(mInvert(rawFace!), metric!);
         clearance = solveClearance({
           verticesLocal: local, anchorLocal, spec: this.spec, hinge, asset: this.asset, scale,
-          tiltDeg: cfg.placement.pantoscopicTiltDeg, cfg: cfg.placement.clearance,
+          tiltDeg: cfg.placement.pantoscopicTiltDeg, bridgeMm: cfg.placement.bridgeClearanceMm, cfg: cfg.placement.clearance,
         });
         anchorLocal = [anchorLocal[0], anchorLocal[1], anchorLocal[2] + this.pushFilter.filter(clearance.forwardMm, frame.timestampMs)];
         templeSplay = {

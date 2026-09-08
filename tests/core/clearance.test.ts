@@ -14,6 +14,8 @@ import { makeSyntheticFrame, type SyntheticPose } from '../helpers/synthetic';
 
 const d2r = Math.PI / 180;
 const CFG = DEFAULT_CONFIG.placement.clearance;
+/** Clearance config without the vertex cap, for tests of the push mechanics themselves. */
+const FREE = { ...CFG, vertexMaxMm: 60 };
 const SPEC_138: FrameSpec = { lens_width_mm: 52, bridge_mm: 18, temple_mm: 140, lens_height_mm: 40, frame_width_mm: 138, nose_pad: 'fixed' };
 /** FR-0001-like asset (hinge 1.5 mm inside the outer edge, acetate rim). */
 const ASSET_138: AssetAnchor = {
@@ -82,6 +84,31 @@ describe('rim probes', () => {
   });
 });
 
+describe('rim probes from the asset outline', () => {
+  it('samples the product rim outline (+X lens, mirrored for −X) on the rim back face when the asset provides it', () => {
+    const outline: [number, number][] = [[10, -10], [40, -10], [40, 10], [10, 10]];
+    const asset: AssetAnchor = { ...ASSET_138, rim_outline_mm: outline, rim_back_mm: 2.5 };
+    const pts = rimProbes(SPEC_138, asset, ANCHOR, { uniform: 1, width: 1 }, 0);
+    expect(pts.length).toBe(48);
+    const right = pts.filter((p) => p[0] > 0), left = pts.filter((p) => p[0] < 0);
+    expect(right.length).toBe(24);
+    for (const p of right) {
+      expect(p[0]).toBeGreaterThanOrEqual(10 - 1e-6);
+      expect(p[0]).toBeLessThanOrEqual(40 + 1e-6);
+      expect(Math.abs(p[1] - ANCHOR[1])).toBeLessThanOrEqual(10 + 1e-6);
+      expect(p[2]).toBeCloseTo(ANCHOR[2] + 2.5, 6);
+      // Every probe lies on the outline (one coordinate on an edge).
+      const onEdge = Math.abs(p[0] - 10) < 1e-6 || Math.abs(p[0] - 40) < 1e-6 || Math.abs(p[1] - ANCHOR[1] + 10) < 1e-6 || Math.abs(p[1] - ANCHOR[1] - 10) < 1e-6;
+      expect(onEdge).toBe(true);
+    }
+    for (const p of left) expect(pts.some((q) => q[0] > 0 && Math.abs(q[0] + p[0]) < 1e-6 && Math.abs(q[1] - p[1]) < 1e-6)).toBe(true);
+    // Evenly spaced along the perimeter: consecutive samples on the same edge are perimeter / 24 apart.
+    const per = (2 * 30 + 2 * 20) / 24;
+    const same = right.filter((p, k) => k > 0 && Math.abs(Math.hypot(p[0] - right[k - 1][0], p[1] - right[k - 1][1]) - per) < 1e-6).length;
+    expect(same).toBeGreaterThanOrEqual(19); // 23 pairs, at most 4 straddle a corner
+  });
+});
+
 describe('solveClearance — temple splay', () => {
   it('splays the arms outward ≈ 7–10° for the canonical face with a 138 mm frame', () => {
     const r = solve(CANONICAL_VERTICES_MM);
@@ -125,29 +152,64 @@ describe('solveClearance — forward push', () => {
   it('pushes the frame forward when a nose pad would sink deeper than padSinkMm', () => {
     // Pads 20 mm behind the bridge origin dig into the nose sides further than the rims do.
     const deepPads: AssetAnchor = { ...ASSET_138, nose_pad_offset: [0, -4, -20] };
-    const r = solve(CANONICAL_VERTICES_MM, { asset: deepPads });
-    const base = solve(CANONICAL_VERTICES_MM);
+    const r = solve(CANONICAL_VERTICES_MM, { asset: deepPads, cfg: FREE });
+    const base = solve(CANONICAL_VERTICES_MM, { cfg: FREE });
     expect(r.forwardMm).toBeGreaterThan(base.forwardMm);
     expect(r.penetration.nose).toBeLessThanOrEqual(0);
   });
   it('clamps the push at maxForwardMm and keeps reporting the residual', () => {
-    const r = solve(CANONICAL_VERTICES_MM, { asset: { ...ASSET_138, nose_pad_offset: [0, -4, -30] }, cfg: { ...CFG, maxForwardMm: 3 } });
+    const r = solve(CANONICAL_VERTICES_MM, { asset: { ...ASSET_138, nose_pad_offset: [0, -4, -30] }, cfg: { ...FREE, maxForwardMm: 3 } });
     expect(r.forwardMm).toBe(3);
     expect(r.penetration.nose).toBeGreaterThan(0);
   });
-  it('leaves no residual penetration after the correction for the canonical face and the sample frames', () => {
+  it('reports the vertex distance (lens back to cornea) and clamps the push so it stays within [vertexMinMm, vertexMaxMm]', () => {
+    // Deep nose collision would push the frame ~10 mm forward; the clamp stops it at vertexMaxMm and reports the residual.
+    const r = solve(CANONICAL_VERTICES_MM, { cfg: { ...CFG, vertexMaxMm: 18 } });
+    expect(r.vertexMm).toBeCloseTo(18, 3);
+    expect(r.penetration.nose).toBeGreaterThan(0);
+    const free = solve(CANONICAL_VERTICES_MM, { cfg: { ...CFG, vertexMaxMm: 60 } });
+    expect(free.vertexMm).toBeGreaterThan(18);
+    expect(free.forwardMm).toBeGreaterThan(r.forwardMm);
+    // An anchor too close to the eyes is pushed out to vertexMinMm.
+    const close = solve(CANONICAL_VERTICES_MM, { anchorLocal: [0, 24.7, 40], cfg: { ...CFG, vertexMinMm: 12, vertexMaxMm: 12.5, noseSinkMm: 100, rimMm: -100 } });
+    expect(close.vertexMm).toBeGreaterThanOrEqual(12 - 1e-6);
+    expect(close.forwardMm).toBeGreaterThan(0);
+    // A pad-contact anchor already beyond vertexMaxMm is pulled back (negative push).
+    const far = solve(CANONICAL_VERTICES_MM, { anchorLocal: [0, 24.7, 70], cfg: { ...CFG, vertexMaxMm: 20 } });
+    expect(far.forwardMm).toBeLessThan(0);
+    expect(far.vertexMm).toBeCloseTo(20, 3);
+  });
+  it('lets the rim sink noseSinkMm into the nose flank before pushing', () => {
+    const tight = solve(CANONICAL_VERTICES_MM, { cfg: { ...CFG, noseSinkMm: 0, vertexMaxMm: 60 } });
+    const loose = solve(CANONICAL_VERTICES_MM, { cfg: { ...CFG, noseSinkMm: 3, vertexMaxMm: 60 } });
+    expect(tight.forwardMm - loose.forwardMm).toBeCloseTo(3, 3);
+    // Residual is reported beyond the allowance: both are clear.
+    expect(loose.penetration.nose).toBeLessThanOrEqual(0);
+    expect(tight.penetration.nose).toBeLessThanOrEqual(0);
+  });
+  it('uses bridgeMm as the bridge-bar margin against the nose ridge', () => {
+    // A frame landed low on the nose so that its bridge bar (9 mm above the origin) meets the ridge; the rim
+    // outline is out on the cheek and the pads are far in front of the skin, so only the bar can collide.
+    const low: [number, number, number] = [0, 6, 60];
+    const metal: AssetAnchor = { ...ASSET_138, lens_plane_mm: 5, rim_depth_mm: 2.2, rim_width_mm: 1.8, rim_outline_mm: [[40, -5], [60, -5], [60, 5], [40, 5]], rim_back_mm: 2.8, nose_pad_offset: [8, -4, 30] };
+    const a = solve(CANONICAL_VERTICES_MM, { anchorLocal: low, asset: metal, bridgeMm: 0.5, cfg: FREE });
+    const b = solve(CANONICAL_VERTICES_MM, { anchorLocal: low, asset: metal, bridgeMm: 3.5, cfg: FREE });
+    expect(a.forwardMm).toBeGreaterThan(0);
+    expect(b.forwardMm - a.forwardMm).toBeCloseTo(3, 3);
+  });
+  it('leaves no residual penetration after an unclamped correction for the canonical face', () => {
     for (const tilt of [0, 8]) {
-      const r = solve(CANONICAL_VERTICES_MM, { tiltDeg: tilt });
+      const r = solve(CANONICAL_VERTICES_MM, { tiltDeg: tilt, cfg: FREE });
       for (const v of Object.values(r.penetration)) expect(v).toBeLessThanOrEqual(0);
       expect(r.forwardMm).toBeGreaterThanOrEqual(0);
-      expect(r.forwardMm).toBeLessThanOrEqual(CFG.maxForwardMm);
+      expect(r.forwardMm).toBeLessThanOrEqual(FREE.maxForwardMm);
     }
   });
 });
 
 describe('FittingCore integration', () => {
   it('reports the clearance solve and the filtered splay when a spec is set', () => {
-    const core = new FittingCore();
+    const core = new FittingCore({ placement: { clearance: { vertexMaxMm: 60 } } });
     core.setFrameSpec(SPEC_138, ASSET_138);
     let out = core.process(makeSyntheticFrame({ t: [0, 0, -500] }, 0));
     for (let i = 1; i < 10; i++) out = core.process(makeSyntheticFrame({ t: [0, 0, -500] }, i * 33));
@@ -156,8 +218,9 @@ describe('FittingCore integration', () => {
     expect(out.templeSplay.left).toBeCloseTo(out.clearance!.splay.left, 3);
     expect(out.clearance!.forwardMm).toBeGreaterThanOrEqual(0);
     for (const v of Object.values(out.clearance!.penetration)) expect(v).toBeLessThanOrEqual(0);
-    // The forward push is applied to the anchor.
-    expect(out.anchorLocal![2]).toBeCloseTo(ANCHOR[2] + out.clearance!.forwardMm, 2);
+    // The pads landed on the flank (sunk padSinkMm) and then moved forward with the push.
+    expect(out.clearance!.padGapMm).toBeCloseTo(out.clearance!.forwardMm - CFG.padSinkMm, 1);
+    expect(out.anchorLocal![2]).toBeLessThan(ANCHOR[2] + out.clearance!.forwardMm - 3);
   });
   it('yields no clearance without a spec', () => {
     const core = new FittingCore();
@@ -167,14 +230,14 @@ describe('FittingCore integration', () => {
   });
 });
 
-describe('face-variant regression (14 variants × 5 poses × 3 frames)', () => {
+describe('face-variant regression (14 variants × 5 poses × product frames)', () => {
   const defs = loadFrameDefs();
   const POSES: Partial<SyntheticPose>[] = [{}, { yawDeg: 30 }, { yawDeg: -30 }, { pitchDeg: 15 }, { pitchDeg: -15 }];
   const WARMUP = 20;
   const MAX_RESIDUAL_MM = 0.5;
   it('covers the spec matrix', () => {
     expect(FACE_VARIANTS.length).toBe(14);
-    expect(defs.length).toBe(3);
+    expect(defs.length).toBe(1);
   });
   for (const variant of FACE_VARIANTS) {
     it(`${variant.name}: residual penetration ≤ ${MAX_RESIDUAL_MM} mm and push ≤ maxForwardMm after ${WARMUP} frames`, () => {
@@ -190,7 +253,12 @@ describe('face-variant regression (14 variants × 5 poses × 3 frames)', () => {
           expect(out.state, tag).toBe('Tracking');
           const c = out.clearance!;
           expect(c, tag).not.toBeNull();
-          for (const [k, v] of Object.entries(c.penetration)) expect(v, `${tag} ${k}`).toBeLessThanOrEqual(MAX_RESIDUAL_MM);
+          for (const k of ['temple', 'brow', 'cheek'] as const) expect(c.penetration[k], `${tag} ${k}`).toBeLessThanOrEqual(MAX_RESIDUAL_MM);
+          // The lens sits at a realistic vertex distance (lens back → cornea) in every case.
+          expect(c.vertexMm, `${tag} vertex`).toBeGreaterThanOrEqual(CFG.vertexMinMm - 0.01);
+          expect(c.vertexMm, `${tag} vertex`).toBeLessThanOrEqual(CFG.vertexMaxMm + 0.01);
+          // Unless the vertex cap is holding the frame back, the nose is clear too.
+          if (c.vertexMm < CFG.vertexMaxMm - 0.01) expect(c.penetration.nose, `${tag} nose`).toBeLessThanOrEqual(MAX_RESIDUAL_MM);
           expect(c.forwardMm, tag).toBeLessThanOrEqual(CFG.maxForwardMm);
           expect(c.splay.left, tag).toBeLessThanOrEqual(CFG.maxSplayDeg * d2r + 1e-9);
           expect(c.splay.right, tag).toBeLessThanOrEqual(CFG.maxSplayDeg * d2r + 1e-9);

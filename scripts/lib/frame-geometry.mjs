@@ -4,37 +4,16 @@
 // origin at the bridge / nose contact point, temples run toward −Z.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { lensOutline } from './lens-outline.mjs';
 
 export const RIM_RADIUS = 1.4;
 export const TEMPLE_RADIUS = 1.1;
 
-/** Lens outline (closed THREE.Shape) centred at the origin, w × h. */
-export function lensShape(kind, w, h) {
-  const s = new THREE.Shape();
-  const hw = w / 2, hh = h / 2;
-  if (kind === 'round') {
-    s.absellipse(0, 0, hw, hh, 0, Math.PI * 2, false, 0);
-    return s;
-  }
-  if (kind === 'square') {
-    const r = Math.min(6, hw * 0.3);
-    s.moveTo(-hw + r, hh);
-    s.lineTo(hw - r, hh);
-    s.quadraticCurveTo(hw, hh, hw, hh - r);
-    s.lineTo(hw, -hh + r);
-    s.quadraticCurveTo(hw, -hh, hw - r, -hh);
-    s.lineTo(-hw + r, -hh);
-    s.quadraticCurveTo(-hw, -hh, -hw, -hh + r);
-    s.lineTo(-hw, hh - r);
-    s.quadraticCurveTo(-hw, hh, -hw + r, hh);
-    return s;
-  }
-  // Aviator: wide flat top, tear-drop bottom.
-  s.moveTo(-hw, hh * 0.55);
-  s.bezierCurveTo(-hw, hh, -hw * 0.3, hh, 0, hh);
-  s.bezierCurveTo(hw * 0.6, hh, hw, hh * 0.7, hw, hh * 0.2);
-  s.bezierCurveTo(hw, -hh * 0.5, hw * 0.55, -hh, 0, -hh);
-  s.bezierCurveTo(-hw * 0.7, -hh, -hw, -hh * 0.4, -hw, hh * 0.55);
+/** Lens outline (closed THREE.Shape) centred at the origin, w × h — from lens-outline.mjs. */
+export function lensShape(kind, w, h, build = {}) {
+  const pts = lensOutline(kind, w, h, build);
+  const s = new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, y)));
+  s.closePath();
   return s;
 }
 
@@ -55,7 +34,7 @@ function strip(geo) {
 
 /**
  * Builds the geometry of one frame.
- * @param {{shape: 'square'|'round'|'aviator', spec: {lens_width_mm:number, bridge_mm:number, temple_mm:number, lens_height_mm:number, frame_width_mm:number, nose_pad:'fixed'|'adjustable'}, build?: Partial<import('./frame-defs').FrameBuild>}} def
+ * @param {{shape: 'square'|'round'|'aviator'|'wellington', spec: {lens_width_mm:number, bridge_mm:number, temple_mm:number, lens_height_mm:number, frame_width_mm:number, nose_pad:'fixed'|'adjustable'}, build?: Partial<import('./frame-defs').FrameBuild>}} def
  */
 export function buildFrameGeometry(def) {
   const { lens_width_mm: lw, bridge_mm: b, temple_mm: tl, lens_height_mm: lh, frame_width_mm: fw, nose_pad } = def.spec;
@@ -79,7 +58,7 @@ export function buildFrameGeometry(def) {
   let lensL = null, lensR = null, templeL = null, templeR = null;
 
   for (const side of [-1, 1]) {
-    const shape = lensShape(def.shape, lw, lh);
+    const shape = lensShape(def.shape, lw, lh, build);
     const pts = shape.getPoints(80).map((p) => new THREE.Vector3(side * p.x + side * lensCenterX, p.y + lensCenterY, frontZ));
     pts.pop(); // closed shapes repeat the first point
     front.push(tubeAlong(pts, RIM_RADIUS, true, 96));
@@ -105,7 +84,7 @@ export function buildFrameGeometry(def) {
     );
     if (side < 0) templeL = temple; else templeR = temple;
     const pad = new THREE.BoxGeometry(2, 9, nose_pad === 'adjustable' ? 5 : 3);
-    pad.translate(side * (b / 2 - 1), padY, padZ);
+    pad.translate(side * (build.pad_center ? build.pad_center[0] : b / 2 - 1), padY, padZ);
     pads.push(pad);
     if (nose_pad === 'adjustable') {
       pads.push(tubeAlong([new THREE.Vector3(side * (lensCenterX - lw / 2 + 1), bridgeY - 4, frontZ), new THREE.Vector3(side * (b / 2 - 1), padY + 3, padZ + 1)], 0.6, false, 4));
@@ -126,7 +105,7 @@ export function buildFrameGeometry(def) {
       bridge: [0, 0, 0],
       temple_left: [-(fw / 2 - hingeInset), hingeY, hingeZ],
       temple_right: [fw / 2 - hingeInset, hingeY, hingeZ],
-      nose_pad_offset: [0, padY, padZ],
+      nose_pad_offset: [build.pad_center ? build.pad_center[0] : 0, padY, padZ],
       lens_plane_mm: frontZ,
       rim_depth_mm: RIM_RADIUS * 2,
       rim_width_mm: RIM_RADIUS * 2,

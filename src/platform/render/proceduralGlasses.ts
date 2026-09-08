@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { buildFrameGeometry, type FrameShape } from '../../../scripts/lib/frame-geometry.mjs';
 import type { AssetAnchor, FrameSpec } from '../../core/types';
 
-const FRAME_COLORS: Record<FrameShape, number> = { square: 0x141212, round: 0xd4b038, aviator: 0xbfbfc6 };
+const FRAME_COLORS: Record<FrameShape, number> = { square: 0x141212, wellington: 0x050505, round: 0xd4b038, aviator: 0xbfbfc6 };
 
 export function buildProceduralGlasses(spec: FrameSpec, shape: FrameShape = 'square', anchorHint?: AssetAnchor | null): { root: THREE.Group; anchor: AssetAnchor } {
   // Reuse the product-master anchor metadata so the fallback's hinges/bend match the API.
@@ -12,11 +12,11 @@ export function buildProceduralGlasses(spec: FrameSpec, shape: FrameShape = 'squ
         hinge_y_mm: anchorHint.temple_right[1], hinge_z_mm: anchorHint.temple_right[2],
         hinge_inset_mm: spec.frame_width_mm / 2 - Math.abs(anchorHint.temple_right[0]),
         lens_plane_mm: anchorHint.lens_plane_mm, temple_bend_mm: anchorHint.temple_bend_mm, temple_drop_mm: anchorHint.temple_drop_mm,
-        pad_center: [0, anchorHint.nose_pad_offset[1], anchorHint.nose_pad_offset[2]] as [number, number, number],
+        pad_center: [anchorHint.nose_pad_offset[0], anchorHint.nose_pad_offset[1], anchorHint.nose_pad_offset[2]] as [number, number, number],
       }
     : undefined;
   const g = buildFrameGeometry({ shape, spec, build });
-  const metal = shape !== 'square';
+  const metal = shape !== 'square' && shape !== 'wellington';
   const frameMat = new THREE.MeshStandardMaterial({ color: FRAME_COLORS[shape], metalness: metal ? 0.9 : 0.05, roughness: metal ? 0.3 : 0.45, side: THREE.DoubleSide });
   const lensMat = new THREE.MeshStandardMaterial({ color: 0xd9e6ff, transparent: true, opacity: 0.18, metalness: 0, roughness: 0.05, side: THREE.DoubleSide, depthWrite: false });
   const padMat = new THREE.MeshStandardMaterial({ color: 0xeeeeee, transparent: true, opacity: 0.6, roughness: 0.6, side: THREE.DoubleSide });

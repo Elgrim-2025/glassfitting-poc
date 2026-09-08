@@ -212,7 +212,7 @@ export class App {
       bridge_raw_x_px: rawScreen ? rawScreen.x * frame.imageWidth : null, bridge_raw_y_px: rawScreen ? rawScreen.y * frame.imageHeight : null,
       bridge_x_px: out.bridgeAnchor ? out.bridgeAnchor.screen.x * frame.imageWidth : null, bridge_y_px: out.bridgeAnchor ? out.bridgeAnchor.screen.y * frame.imageHeight : null,
       width_scale: out.widthScale, uniform_scale: out.uniformScale, splay_l_deg: (out.templeSplay.left * 180) / Math.PI, splay_r_deg: (out.templeSplay.right * 180) / Math.PI,
-      forward_mm: out.clearance?.forwardMm ?? null,
+      forward_mm: out.clearance?.forwardMm ?? null, vertex_mm: out.clearance?.vertexMm ?? null, pad_gap_mm: out.clearance?.padGapMm ?? null,
       pen_temple: out.clearance?.penetration.temple ?? null, pen_brow: out.clearance?.penetration.brow ?? null,
       pen_cheek: out.clearance?.penetration.cheek ?? null, pen_nose: out.clearance?.penetration.nose ?? null,
       pd_near: out.pd.pd_near, pd_far: out.pd.pd_far, pd_samples: out.pd.sample_count,

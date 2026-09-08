@@ -49,6 +49,21 @@ describe('solveNoseLanding', () => {
     expect(r.landingY).toBeCloseTo(yOf(LM.BRIDGE), 3);
     expect(r.anchor[2]).toBeCloseTo(zOf(LM.BRIDGE) + 1, 3);
   });
+  it('rests the nose pads on the flanks when the asset describes them (pad contact, not ridge + clearance)', () => {
+    const { face, metric } = setup();
+    const asset = { bridge: [0, 0, 0] as [number, number, number], temple_left: [-67.5, 13, 6] as [number, number, number], temple_right: [67.5, 13, 6] as [number, number, number], nose_pad_offset: [8, -4, 0] as [number, number, number] };
+    const r = solveNoseLanding(metric, face, spec, DEFAULT_CONFIG.placement, asset, { uniform: 1, width: 1 }, 0);
+    expect(r.padContact).toBe(true);
+    expect(r.landingY).toBeCloseTo(yOf(LM.BRIDGE), 3);
+    // Canonical flank at (±8, 20.7) is ≈ 53.3 mm; the contact face sinks padSinkMm (1) into it.
+    expect(r.anchor[2]).toBeGreaterThan(51);
+    expect(r.anchor[2]).toBeLessThan(54);
+    expect(r.anchor[2]).toBeLessThan(zOf(LM.BRIDGE) - 3);
+    // The pantoscopic tilt moves the pad contact point, and the origin follows.
+    const tilted = solveNoseLanding(metric, face, spec, DEFAULT_CONFIG.placement, asset, { uniform: 1, width: 1 }, 8);
+    expect(Math.abs(tilted.anchor[2] - r.anchor[2])).toBeLessThan(2);
+    expect(tilted.anchor[2]).not.toBeCloseTo(r.anchor[2], 3);
+  });
   it('adjustable pads and a wider bridge land lower and on the ridge surface', () => {
     const { face, metric } = setup();
     const r = solveNoseLanding(metric, face, { ...spec, bridge_mm: 20, nose_pad: 'adjustable' }, DEFAULT_CONFIG.placement);

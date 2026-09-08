@@ -81,9 +81,11 @@ export class Panel {
   private render: RenderOptions = { faceOccluder: true, headOccluder: true, debugOccluder: false };
   private overlay: OverlayOptions = { landmarks: false, anchors: true };
   private controls = new Map<string, HTMLInputElement>();
+  private vertexRange: [number, number];
 
   constructor(private root: HTMLElement, private cb: PanelCallbacks, cfg: FittingConfig, cameraProfiles: CameraProfile[]) {
     root.innerHTML = '';
+    this.vertexRange = [cfg.placement.clearance.vertexMinMm, cfg.placement.clearance.vertexMaxMm];
     this.build(cfg, cameraProfiles);
   }
 
@@ -223,12 +225,17 @@ export class Panel {
     this.readout(s3, 'splay', '다리 벌림 L / R (°)');
     this.readout(s3, 'pen', '관통 잔여 (mm) 다리/눈썹/볼/코');
     this.readout(s3, 'forward', '전방 보정 (mm)');
+    this.readout(s3, 'vertex', '정점간 거리 / 패드 간격 (mm)');
     this.checkbox(s3, 'widthScale', '폭 비율 보정', cfg.placement.widthScaleEnabled, (v) => cb.onConfigPatch({ placement: { widthScaleEnabled: v } }));
     this.checkbox(s3, 'realSize', '실치수 모드 (PD 준비 시)', cfg.placement.realSizeMode, (v) => cb.onConfigPatch({ placement: { realSizeMode: v } }));
     this.slider(s3, 'clearance', '브릿지 클리어런스 (mm)', -3, 6, 0.5, cfg.placement.bridgeClearanceMm, (v) => cb.onConfigPatch({ placement: { bridgeClearanceMm: v } }));
     this.slider(s3, 'tilt', '팬토스코픽 틸트 (°)', -5, 15, 0.5, cfg.placement.pantoscopicTiltDeg, (v) => cb.onConfigPatch({ placement: { pantoscopicTiltDeg: v } }));
     this.checkbox(s3, 'kabsch', '대안 경로: Kabsch 포즈', cfg.placement.useKabschPose, (v) => cb.onConfigPatch({ placement: { useKabschPose: v } }));
-    this.checkbox(s3, 'depthLm', '깊이: 랜드마크 z 사용 (정규 모델 대신 — 실기기에서 비교)', cfg.placement.depthSource === 'landmark', (v) => cb.onConfigPatch({ placement: { depthSource: v ? 'landmark' : 'canonical' } }));
+    const depth = this.select(s3, '얼굴 깊이 출처', (v) => cb.onConfigPatch({ placement: { depthSource: v as FittingConfig['placement']['depthSource'] } }));
+    depth.add(new Option('하이브리드 (정규 모델 + 코만 랜드마크 z)', 'hybrid'));
+    depth.add(new Option('정규 모델 깊이', 'canonical'));
+    depth.add(new Option('랜드마크 z 전체', 'landmark'));
+    depth.value = cfg.placement.depthSource;
     this.checkbox(s3, 'transpose', '행렬 전치(디버그)', cfg.transposeMatrix, (v) => cb.onConfigPatch({ transposeMatrix: v }));
     this.checkbox(s3, 'faceOcc', '얼굴 오클루더', this.render.faceOccluder, (v) => { this.render = { ...this.render, faceOccluder: v }; cb.onRender(this.render); });
     this.checkbox(s3, 'headOcc', '머리 오클루더', this.render.headOccluder, (v) => { this.render = { ...this.render, headOccluder: v }; cb.onRender(this.render); });
@@ -315,9 +322,12 @@ export class Panel {
       const clear = p.temple <= 0 && p.brow <= 0 && p.cheek <= 0 && p.nose <= 0;
       this.set('pen', `${fmt(p.temple, 1)} / ${fmt(p.brow, 1)} / ${fmt(p.cheek, 1)} / ${fmt(p.nose, 1)}`, clear ? 'ok' : 'bad');
       this.set('forward', fmt(c.forwardMm, 1));
+      // Vertex distance 10–22 mm is the configured range; pads floating > 3 mm off the nose is worth a look.
+      this.set('vertex', `${fmt(c.vertexMm, 1)} / ${fmt(c.padGapMm, 1)}`, c.vertexMm >= this.vertexRange[1] - 0.05 || c.padGapMm > 3 ? 'warn' : 'ok');
     } else {
       this.set('pen', '—');
       this.set('forward', '—');
+      this.set('vertex', '—');
     }
     const pd = s.pd;
     const reject = pd.last_reject ? REJECT_KO[pd.last_reject] ?? pd.last_reject : '채택';

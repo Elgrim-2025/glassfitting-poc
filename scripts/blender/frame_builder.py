@@ -1,16 +1,21 @@
 """Parametric eyeglass-frame modelling in Blender → GLB (docs/assets/glb-spec.md).
 
 Reads scripts/frames.json and builds each frame from its spec (mm): flat-profile rims
-swept around the lens outline, curved lenses, bridge, end pieces with hinges, tapered
-temples that bend behind the ear, and nose pads. Node names follow the asset spec so the
-runtime rig (src/platform/render/glasses.ts) and the clearance solver can use them.
+swept around the lens outline (width tapering from the top rim to the bottom rim), curved
+lenses, a bridge bar, end pieces with hinges and optional metal rivets, tapered temples
+that bend behind the ear with an optional translucent tip, and nose pads. Node names
+follow the asset spec so the runtime rig (src/platform/render/glasses.ts) and the clearance
+solver can use them.
 
-Coordinates: glTF axes are +Y up, +Z toward the camera, origin at the bridge nose contact.
-Blender is Z-up, so a glTF point (x, y, z) is modelled at Blender (x, -z, y); the default
-"+Y up" export maps it back.
+Coordinates: glTF axes are +Y up, +Z toward the camera, origin at the nose-pad contact
+plane. Blender is Z-up, so a glTF point (x, y, z) is modelled at Blender (x, -z, y); the
+default "+Y up" export maps it back.
+
+The lens outline functions mirror scripts/lib/lens-outline.mjs (the JS side derives the
+mock API's rim outline from the same definitions; gen-frames.mjs cross-checks both).
 
 Usage (headless):
-  Blender -b --python scripts/blender/frame_builder.py -- --frames scripts/frames.json --out public/assets/frames [--only FR-0001]
+  Blender -b --python scripts/blender/frame_builder.py -- --frames scripts/frames.json --out public/assets/frames [--only FR-0001] [--report path.json]
 Usage (Blender MCP / interactive): set FRAME_BUILDER_NO_MAIN = True before exec'ing this
 file, then call build_all(defs, out_dir) or build_frame(def).
 """
@@ -20,10 +25,13 @@ import json
 import math
 import os
 import sys
-from mathutils import Vector
+from mathutils import Matrix, Vector
+
+LENS_SPHERE_R = 130.0        # 4-base lens curve
+LENS_CENTER_THICKNESS = 1.5  # assumed centre thickness for the lens back (vertex distance)
 
 # ---------------------------------------------------------------------------
-# Coordinates and 2-D outlines
+# Coordinates and 2-D outlines (port of scripts/lib/lens-outline.mjs)
 # ---------------------------------------------------------------------------
 
 def G(x, y, z):
@@ -31,23 +39,69 @@ def G(x, y, z):
     return Vector((x, -z, y))
 
 
-def rounded_rect(w, h, r, n_corner=6, r_bottom=None):
-    """Closed CCW polyline (list of (x, y)) of a w×h rectangle centred at the origin with
-    rounded corners (radius r on top, r_bottom on the bottom)."""
-    rb = r if r_bottom is None else r_bottom
-    hw, hh = w / 2, h / 2
+def dedupe(pts, eps=1e-6):
+    out = []
+    for p in pts:
+        if not out or (abs(p[0] - out[-1][0]) > eps or abs(p[1] - out[-1][1]) > eps):
+            out.append((p[0], p[1]))
+    if len(out) > 1 and abs(out[0][0] - out[-1][0]) < eps and abs(out[0][1] - out[-1][1]) < eps:
+        out.pop()
+    return out
+
+
+def signed_area(pts):
+    a = 0.0
+    for i in range(len(pts)):
+        x0, y0 = pts[i]
+        x1, y1 = pts[(i + 1) % len(pts)]
+        a += x0 * y1 - x1 * y0
+    return a / 2
+
+
+def fillet_polygon(corners, radii, n_corner=8):
+    """Replaces each corner of a convex polygon by an arc tangent to both adjacent edges."""
+    n = len(corners)
     pts = []
-
-    def arc(cx, cy, rad, a0, a1):
+    for i in range(n):
+        P = Vector(corners[i])
+        A = Vector(corners[(i - 1) % n])
+        B = Vector(corners[(i + 1) % n])
+        u = (A - P)
+        v = (B - P)
+        la, lb = u.length, v.length
+        u.normalize()
+        v.normalize()
+        r = radii[i]
+        if r <= 1e-6:
+            pts.append((P.x, P.y))
+            continue
+        theta = math.acos(max(-1.0, min(1.0, u.dot(v))))
+        d = min(r / math.tan(theta / 2), la * 0.5, lb * 0.5)
+        r_eff = d * math.tan(theta / 2)
+        T1 = P + u * d
+        T2 = P + v * d
+        bis = (u + v).normalized()
+        C = P + bis * (r_eff / math.sin(theta / 2))
+        a1 = math.atan2(T1.y - C.y, T1.x - C.x)
+        da = math.atan2(T2.y - C.y, T2.x - C.x) - a1
+        while da > math.pi:
+            da -= 2 * math.pi
+        while da < -math.pi:
+            da += 2 * math.pi
         for k in range(n_corner + 1):
-            a = a0 + (a1 - a0) * k / n_corner
-            pts.append((cx + rad * math.cos(a), cy + rad * math.sin(a)))
-
-    arc(hw - r, hh - r, r, 0, math.pi / 2)              # top-right
-    arc(-hw + r, hh - r, r, math.pi / 2, math.pi)       # top-left
-    arc(-hw + rb, -hh + rb, rb, math.pi, 1.5 * math.pi)  # bottom-left
-    arc(hw - rb, -hh + rb, rb, 1.5 * math.pi, 2 * math.pi)  # bottom-right
+            a = a1 + da * k / n_corner
+            pts.append((C.x + r_eff * math.cos(a), C.y + r_eff * math.sin(a)))
     return dedupe(pts)
+
+
+def normalize_box(pts, w, h):
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    sx = w / (max(xs) - min(xs))
+    sy = h / (max(ys) - min(ys))
+    cx = (min(xs) + max(xs)) / 2
+    cy = (min(ys) + max(ys)) / 2
+    return [((x - cx) * sx, (y - cy) * sy) for (x, y) in pts]
 
 
 def ellipse(w, h, n=96):
@@ -67,8 +121,6 @@ def bezier(p0, p1, p2, p3, n):
 
 
 def aviator(w, h, n=28):
-    """Tear-drop aviator lens: wide flat top, rounded bottom (same control points as
-    scripts/lib/frame-geometry.mjs so the procedural fallback matches). CCW."""
     hw, hh = w / 2, h / 2
     pts = []
     pts += bezier((-hw, hh * 0.55), (-hw, hh), (-hw * 0.3, hh), (0, hh), n)
@@ -76,30 +128,29 @@ def aviator(w, h, n=28):
     pts += bezier((hw, hh * 0.2), (hw, -hh * 0.5), (hw * 0.55, -hh), (0, -hh), n)
     pts += bezier((0, -hh), (-hw * 0.7, -hh), (-hw, -hh * 0.4), (-hw, hh * 0.55), n)
     pts = dedupe(pts)
-    return pts if signed_area(pts) > 0 else list(reversed(pts))
+    pts = pts if signed_area(pts) > 0 else list(reversed(pts))
+    return normalize_box(pts, w, h)
 
 
-def signed_area(pts):
-    a = 0.0
-    for i in range(len(pts)):
-        x0, y0 = pts[i]
-        x1, y1 = pts[(i + 1) % len(pts)]
-        a += x0 * y1 - x1 * y0
-    return a / 2
+def lens_outline(shape, w, h, b=None):
+    """+X lens outline in its own centred coordinates (mm), CCW, boxed exactly to w × h."""
+    b = b or {}
+    hw, hh = w / 2, h / 2
+    if shape == 'round':
+        return ellipse(w, h, 96)
+    if shape == 'aviator':
+        return aviator(w, h)
+    if shape == 'wellington':
+        r_to, r_ti, r_bi, r_bo = b.get('corner_radius_mm', [4, 6, 11, 9])
+        s_in, s_out = b.get('inner_slant_mm', 3.5), b.get('outer_slant_mm', 1.5)
+        corners = [(hw, hh), (-hw, hh), (-hw + s_in, -hh), (hw - s_out, -hh)]
+        return normalize_box(fillet_polygon(corners, [r_to, r_ti, r_bi, r_bo], 8), w, h)
+    r, rb = min(9, w * 0.17), min(12, w * 0.22)
+    return normalize_box(fillet_polygon([(hw, hh), (-hw, hh), (-hw, -hh), (hw, -hh)], [r, r, rb, rb], 6), w, h)
 
 
-def dedupe(pts, eps=1e-6):
-    out = []
-    for p in pts:
-        if not out or (abs(p[0] - out[-1][0]) > eps or abs(p[1] - out[-1][1]) > eps):
-            out.append(p)
-    if len(out) > 1 and abs(out[0][0] - out[-1][0]) < eps and abs(out[0][1] - out[-1][1]) < eps:
-        out.pop()
-    return out
-
-
-def resample_closed(pts, spacing):
-    """Evenly spaced points along a closed polyline."""
+def resample_closed(pts, spacing=None, count=None):
+    """Evenly spaced points along a closed polyline (by spacing in mm, or a fixed count)."""
     n = len(pts)
     seg = []
     total = 0.0
@@ -109,7 +160,7 @@ def resample_closed(pts, spacing):
         d = math.hypot(x1 - x0, y1 - y0)
         seg.append(d)
         total += d
-    count = max(12, int(round(total / spacing)))
+    count = count or max(12, int(round(total / spacing)))
     step = total / count
     out = []
     i, acc = 0, 0.0
@@ -126,7 +177,7 @@ def resample_closed(pts, spacing):
 
 
 def offset_closed(pts, dist):
-    """Offset a closed CCW polyline outward by dist (bisector method)."""
+    """Offset a closed CCW polyline outward by dist (number or callable (x, y) → mm), bisector method."""
     n = len(pts)
     out = []
     for i in range(n):
@@ -142,41 +193,42 @@ def offset_closed(pts, dist):
             bis = n1
         bis.normalize()
         cos_half = max(0.3, bis.dot(n1))
-        out.append((x1 + bis.x * dist / cos_half, y1 + bis.y * dist / cos_half))
+        d = dist(x1, y1) if callable(dist) else dist
+        out.append((x1 + bis.x * d / cos_half, y1 + bis.y * d / cos_half))
     return out
 
 
-def lens_outline(shape, w, h):
-    if shape == 'round':
-        return ellipse(w, h, 96)
-    if shape == 'aviator':
-        return aviator(w, h)
-    return rounded_rect(w, h, min(9, w * 0.17), 8, r_bottom=min(12, w * 0.22))
+def rim_width_at(y, hh, top, bottom):
+    return bottom + (top - bottom) * ((y + hh) / (2 * hh))
 
 
 # ---------------------------------------------------------------------------
 # Profiles and sweeps
 # ---------------------------------------------------------------------------
 
-def profile_rect(w, h, r, seg=3):
+def profile_rect(w, h, r, seg=4):
     """Rounded rectangle in the (u, v) profile plane, CCW."""
     r = min(r, w / 2 - 1e-3, h / 2 - 1e-3)
-    return rounded_rect(w, h, r, seg)
+    hw, hh = w / 2, h / 2
+    return fillet_polygon([(hw, hh), (-hw, hh), (-hw, -hh), (hw, -hh)], [r, r, r, r], seg)
 
 
 def profile_circle(d, n=14):
     return [(d / 2 * math.cos(2 * math.pi * k / n), d / 2 * math.sin(2 * math.pi * k / n)) for k in range(n)]
 
 
-def sweep(bm, path, profile, up, closed=False, taper=None, outward=None):
+def sweep(bm, path, profile, up, closed=False, taper=None, outward=None, material=0):
     """Sweep a 2-D profile along a 3-D path (Blender coords).
 
     Frame at each point: t = tangent, n = normalize(t × up) (profile u axis), b = n × t (v).
     `outward`, when given (Blender vector, the outline centre), flips n to point away from it.
     `taper(i, s)` returns (su, sv) profile scale at path index i / arc length s.
+    `material` is an int or a callable (i, s) → material index for the faces after ring i.
+    Returns (faces, arclengths).
     """
     N = len(path)
     rings = []
+    arcs = []
     s = 0.0
     for i in range(N):
         if closed:
@@ -189,6 +241,7 @@ def sweep(bm, path, profile, up, closed=False, taper=None, outward=None):
             t = (path[i + 1] - path[i - 1]).normalized()
         if i > 0:
             s += (path[i] - path[i - 1]).length
+        arcs.append(s)
         n = t.cross(up)
         if n.length < 1e-6:
             n = t.cross(Vector((1, 0, 0)))
@@ -204,34 +257,82 @@ def sweep(bm, path, profile, up, closed=False, taper=None, outward=None):
     last = N if closed else N - 1
     for i in range(last):
         r0, r1 = rings[i], rings[(i + 1) % N]
+        mi = material(i, arcs[i]) if callable(material) else material
         for k in range(M):
-            faces.append(bm.faces.new((r0[k], r0[(k + 1) % M], r1[(k + 1) % M], r1[k])))
+            f = bm.faces.new((r0[k], r0[(k + 1) % M], r1[(k + 1) % M], r1[k]))
+            f.material_index = mi
+            faces.append(f)
     if not closed:
-        faces.append(bm.faces.new(rings[0]))
-        faces.append(bm.faces.new(list(reversed(rings[-1]))))
-    return faces
+        f0 = bm.faces.new(rings[0])
+        f0.material_index = material(0, 0.0) if callable(material) else material
+        f1 = bm.faces.new(list(reversed(rings[-1])))
+        f1.material_index = material(N - 2, arcs[-1]) if callable(material) else material
+        faces += [f0, f1]
+    return faces, arcs
 
 
-def ellipsoid(bm, center, radii, rot=None, segments=20, rings=12):
-    """UV ellipsoid; rot is a Blender Matrix (3×3) applied before translation."""
-    verts = bmesh.ops.create_uvsphere(bm, u_segments=segments, v_segments=rings, radius=1.0)['verts']
+def ellipsoid(bm, center, radii, rot=None, segments=20, rings=12, material=0):
+    """UV ellipsoid (Blender-axis radii); rot is a 3×3 Matrix applied before translation."""
+    res = bmesh.ops.create_uvsphere(bm, u_segments=segments, v_segments=rings, radius=1.0)
+    verts = res['verts']
     for v in verts:
         p = Vector((v.co.x * radii[0], v.co.y * radii[1], v.co.z * radii[2]))
         if rot is not None:
             p = rot @ p
         v.co = p + center
+    if material:
+        for f in bm.faces:
+            if all(v in verts for v in f.verts):
+                f.material_index = material
     return verts
 
 
-def finish_mesh(name, bm, material, smooth=True):
+def cylinder(bm, center, axis, radius, length, segments=12, material=0):
+    """Closed cylinder around `axis` (Blender unit vector) centred at `center`."""
+    axis = axis.normalized()
+    ref = Vector((0, 0, 1)) if abs(axis.z) < 0.9 else Vector((1, 0, 0))
+    u = axis.cross(ref).normalized()
+    v = axis.cross(u).normalized()
+    ring0, ring1 = [], []
+    for k in range(segments):
+        a = 2 * math.pi * k / segments
+        d = u * (radius * math.cos(a)) + v * (radius * math.sin(a))
+        ring0.append(bm.verts.new(center - axis * (length / 2) + d))
+        ring1.append(bm.verts.new(center + axis * (length / 2) + d))
+    faces = []
+    for k in range(segments):
+        faces.append(bm.faces.new((ring0[k], ring0[(k + 1) % segments], ring1[(k + 1) % segments], ring1[k])))
+    faces.append(bm.faces.new(ring0))
+    faces.append(bm.faces.new(list(reversed(ring1))))
+    for f in faces:
+        f.material_index = material
+    return faces
+
+
+SHARP_ANGLE = math.radians(20)
+
+
+def finish_mesh(name, bm, materials, smooth=True):
+    """Smooth-shaded mesh whose edges sharper than SHARP_ANGLE keep a crease (split normals on
+    export), so flat acetate faces read as flat instead of the tube look of fully smooth normals."""
+    if not isinstance(materials, (list, tuple)):
+        materials = [materials]
     bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-4)
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    for e in bm.edges:
+        if len(e.link_faces) == 2:
+            try:
+                if e.calc_face_angle() > SHARP_ANGLE:
+                    e.smooth = False
+            except ValueError:
+                pass
     me = bpy.data.meshes.new(name)
     bm.to_mesh(me)
     bm.free()
     for p in me.polygons:
         p.use_smooth = smooth
-    me.materials.append(material)
+    for m in materials:
+        me.materials.append(m)
     ob = bpy.data.objects.new(name, me)
     bpy.context.scene.collection.objects.link(ob)
     return ob
@@ -274,73 +375,87 @@ def build_frame(d):
     metal = d['style'] == 'metal'
     lens_z = b['lens_plane_mm']
     rim_w, rim_d, rim_r = b['rim_width_mm'], b['rim_depth_mm'], b['rim_bevel_mm']
+    rim_w_bot = b.get('rim_width_bottom_mm', rim_w)
     lens_cy = b['lens_center_y_mm']
     lens_cx = bw / 2 + lw / 2
-    top_y = lens_cy + lh / 2
+    hh = lh / 2
     bridge_y = lens_cy + lh * b['bridge_height_ratio']
     hinge_y, hinge_z = b['hinge_y_mm'], b['hinge_z_mm']
     hinge_x = fw / 2 - b.get('hinge_inset_mm', 0)
     end_mm = b['endpiece_mm']
     bend, drop, hook = b.get('temple_bend_mm', round(tl * 0.68)), b.get('temple_drop_mm', 28), b.get('temple_hook_mm', 2)
+    tip_len = b.get('temple_tip_mm', 0)
     sec, tip = b['temple_section_mm'], b['temple_tip_section_mm']
     pad_c, pad_s = b['pad_center'], b['pad_size_mm']
     pad_tilt = math.radians(b.get('pad_tilt_deg', 0))
+    pad_splay = math.radians(b.get('pad_splay_deg', 25))
+    rivets = bool(b.get('rivets', False))
+    width_at = lambda y: rim_width_at(y, hh, rim_w, rim_w_bot)  # y in lens-local coords
 
     frame_mat = make_material(f"{d['frame_id']}_frame", d['color'], d['metallic'], d['roughness'])
     lens_mat = make_material(f"{d['frame_id']}_lens", d['lens_tint'], 0.0, 0.05, d['lens_alpha'])
     pad_mat = make_material(f"{d['frame_id']}_pad", (0.92, 0.92, 0.92), 0.0, 0.5, 0.6)
+    metal_mat = make_material(f"{d['frame_id']}_metal", (0.86, 0.86, 0.88), 0.95, 0.25)
+    tip_mat = make_material(f"{d['frame_id']}_tip", (0.72, 0.72, 0.74), 0.0, 0.2, 0.45)
 
     root = empty(d['frame_id'], Vector((0, 0, 0)))
     rim_profile = profile_rect(rim_w, rim_d, rim_r)
     rim_z = lens_z - rim_d / 2 + 1.0  # rim front 1 mm proud of the lens plane
+    rim_back = rim_z - rim_d / 2
     front_bm = bmesh.new()
     lenses = []
-    rim_paths = {}
+    rim_outer = None
+    outline_r = None
 
     for side in (-1, 1):
-        outline = lens_outline(d['shape'], lw, lh)
+        outline = lens_outline(d['shape'], lw, lh, b)
+        if side > 0:
+            outline_r = outline
         outline = [(side * x, y) for (x, y) in outline]
         if side < 0:
             outline = list(reversed(outline))  # keep CCW after mirroring
-        centre_pts = resample_closed(offset_closed(outline, rim_w / 2), 1.2)
+        centre_pts = resample_closed(offset_closed(outline, lambda x, y: width_at(y) / 2), spacing=1.2)
         path = [G(side * lens_cx + x, lens_cy + y, rim_z) for (x, y) in centre_pts]
-        rim_paths[side] = centre_pts
-        sweep(front_bm, path, rim_profile, up=G(0, 0, 1), closed=True, outward=G(side * lens_cx, lens_cy, rim_z))
+        ys = [y for (_, y) in centre_pts]
+        taper = (lambda i, s, ys=ys: (width_at(ys[i]) / rim_w, 1.0))
+        sweep(front_bm, path, rim_profile, up=G(0, 0, 1), closed=True, taper=taper, outward=G(side * lens_cx, lens_cy, rim_z))
+        if side > 0:
+            outer = offset_closed(outline, lambda x, y: width_at(y))
+            rim_outer = [(round(lens_cx + x, 2), round(lens_cy + y, 2)) for (x, y) in resample_closed(outer, count=48)]
 
         # Lens: filled outline, spherical sag (4-base ≈ R 130 mm), 0.8 mm behind the rim front.
         lb = bmesh.new()
-        inner = resample_closed(outline, 2.0)
+        inner = resample_closed(outline, spacing=2.0)
         verts = [lb.verts.new(G(side * lens_cx + x, lens_cy + y, lens_z)) for (x, y) in inner]
         lb.faces.new(verts)
         bmesh.ops.triangulate(lb, faces=lb.faces[:])
         for _ in range(3):
             bmesh.ops.subdivide_edges(lb, edges=lb.edges[:], cuts=1, use_grid_fill=True)
         bmesh.ops.triangulate(lb, faces=lb.faces[:])
-        R = 130.0
+        R = LENS_SPHERE_R
         cx, cy = side * lens_cx, lens_cy
+        edge_sag = R - math.sqrt(max(0.0, R * R - (lw / 2) ** 2))
         for v in lb.verts:
             gx, gy = v.co.x, v.co.z
             r2 = (gx - cx) ** 2 + (gy - cy) ** 2
             sag = R - math.sqrt(max(0.0, R * R - r2))
-            edge_r2 = (lw / 2) ** 2
-            edge_sag = R - math.sqrt(max(0.0, R * R - edge_r2))
             v.co.y = -(lens_z - 0.8 + (edge_sag - sag))
         lenses.append(finish_mesh('lens_L' if side < 0 else 'lens_R', lb, lens_mat))
 
         # End piece: a rounded block that thickens the rim's outer side and carries the hinge.
-        # Its outer face is at ±frame_width/2; it reaches back past the hinge axis so the
-        # temple root emerges from its back face.
         x_out = side * fw / 2
         z_front = rim_z + rim_d / 2
-        rim_edge_x = side * (lens_cx + rim_edge_at(outline, hinge_y - lens_cy, rim_w))
+        rim_edge_x = side * (lens_cx + rim_edge_at(outline, hinge_y - lens_cy, width_at(hinge_y - lens_cy)))
         if not metal:
             depth = end_mm + 2
             ep = profile_rect(depth, end_mm, min(1.5, end_mm * 0.25))
             x_in = rim_edge_x - side * 3
             box = [G(x_in, hinge_y, z_front - depth / 2), G(x_out, hinge_y, z_front - depth / 2)]
             sweep(front_bm, box, ep, up=G(0, 1, 0))
+            if rivets:
+                for dx in (2.6, 5.6):
+                    cylinder(front_bm, G(x_out - side * dx, hinge_y, z_front - 0.2), G(0, 0, 1), 0.7, 1.0, 12, material=1)
         else:
-            # Wire strut from the rim to a small hinge block at the outer edge.
             block_w = end_mm * 0.8
             strut = [G(rim_edge_x - side * 1.0, hinge_y, rim_z), G(x_out - side * block_w * 0.5, hinge_y, rim_z)]
             sweep(front_bm, strut, profile_circle(1.8), up=G(0, 1, 0))
@@ -348,31 +463,18 @@ def build_frame(d):
             ep = profile_rect(depth, end_mm * 0.9, 0.8)
             box = [G(x_out - side * block_w, hinge_y, z_front - depth / 2), G(x_out, hinge_y, z_front - depth / 2)]
             sweep(front_bm, box, ep, up=G(0, 1, 0))
-        # Hinge knuckle (visible barrel on metal frames).
-        if metal:
-            kb = bmesh.new()
-            ellipsoid(kb, G(side * hinge_x, hinge_y, hinge_z - 1.0), (1.2, 3.0, 1.2), segments=14, rings=8)
-            kb_faces = kb.faces[:]
-            bmesh.ops.recalc_face_normals(kb, faces=kb_faces)
-            for v in kb.verts:
-                front_bm.verts.new(v.co)
-            front_bm.verts.ensure_lookup_table()
-            base = len(front_bm.verts) - len(kb.verts)
-            kb.verts.ensure_lookup_table()
-            for f in kb_faces:
-                front_bm.faces.new([front_bm.verts[base + v.index] for v in f.verts])
-            kb.free()
+            ellipsoid(front_bm, G(side * hinge_x, hinge_y, hinge_z - 1.0), (1.2, 3.0, 1.2), segments=14, rings=8)
 
-    # Bridge: arch between the rims at bridge_y, embedded into both rims.
-    inner_left = -(bw / 2) - rim_w
-    arch = [G(inner_left * (1 - t) + (-inner_left) * t, bridge_y + b['bridge_arch_mm'] * math.sin(math.pi * t) * 1.0, rim_z) for t in [k / 24 for k in range(25)]]
-    bridge_profile = rim_profile if not metal else profile_circle(1.8)
+    # Bridge: bar between the rims at bridge_y, embedded into both rims.
+    inner_left = -(bw / 2) - width_at(bridge_y - lens_cy)
+    arch = [G(inner_left * (1 - t) + (-inner_left) * t, bridge_y + b['bridge_arch_mm'] * math.sin(math.pi * t), rim_z) for t in [k / 24 for k in range(25)]]
+    bridge_profile = profile_rect(b.get('bridge_bar_mm', rim_w), rim_d, rim_r) if not metal else profile_circle(1.8)
     sweep(front_bm, arch, bridge_profile, up=G(0, 0, 1))
     if b.get('double_bridge_mm'):
         y2 = bridge_y + b['double_bridge_mm']
         bar = [G(inner_left * 1.15 * (1 - t) + (-inner_left) * 1.15 * t, y2 + 1.0 * math.sin(math.pi * t), rim_z) for t in [k / 16 for k in range(17)]]
         sweep(front_bm, bar, profile_circle(1.6), up=G(0, 0, 1))
-    front = finish_mesh('frame_front', front_bm, frame_mat)
+    front = finish_mesh('frame_front', front_bm, [frame_mat, metal_mat])
 
     # Temples: straight to the ear bend, then a smooth drop with a slight inward hook.
     temples = []
@@ -388,37 +490,40 @@ def build_frame(d):
         straight = [G(x0, hinge_y, z0 - s) for s in [j * 4.0 for j in range(int(bend / 4.0))]]
         path = straight + curve
         length = sum((path[i] - path[i - 1]).length for i in range(1, len(path)))
+        tip_start = length - tip_len if tip_len > 0 else float('inf')
+        mat_of = lambda i, s, ts=tip_start: 1 if s >= ts else 0
         if metal:
-            # Wire arm, then an acetate ear tip for the last 40 mm.
             wire_end = length - 40
             wpath = [p for p, s in zip(path, arclens(path)) if s <= wire_end + 2]
             sweep(tb, wpath, profile_circle(sec[0]), up=G(0, 1, 0))
             tpath = [p for p, s in zip(path, arclens(path)) if s >= wire_end - 2]
-            sweep(tb, tpath, profile_rect(tip[1], tip[0], 0.8), up=G(0, 1, 0))
+            sweep(tb, tpath, profile_rect(tip[1], tip[0], 0.8), up=G(0, 1, 0), material=1)
         else:
             def taper(i, s, L=length):
                 t = min(1.0, max(0.0, s / L))
                 return ((sec[1] + (tip[1] - sec[1]) * t) / sec[1], (sec[0] + (tip[0] - sec[0]) * t) / sec[0])
-            sweep(tb, path, profile_rect(sec[1], sec[0], 0.8), up=G(0, 1, 0), taper=taper)
-        temples.append(finish_mesh('temple_L' if side < 0 else 'temple_R', tb, frame_mat))
+            sweep(tb, path, profile_rect(sec[1], sec[0], 0.8), up=G(0, 1, 0), taper=taper, material=mat_of)
+            if rivets:
+                for dz in (6.0, 9.0):
+                    cylinder(tb, G(x0 + side * (sec[1] / 2 - 0.2), hinge_y, z0 - dz), G(1, 0, 0), 0.7, 1.0, 12, material=2)
+        temples.append(finish_mesh('temple_L' if side < 0 else 'temple_R', tb, [frame_mat, tip_mat, metal_mat]))
 
-    # Nose pads.
+    # Nose pads (pad_size_mm = [width x, height y, thickness z]); the contact face is at pad z − thickness/2.
     pb = bmesh.new()
     for side in (-1, 1):
         c = G(side * pad_c[0], pad_c[1], pad_c[2])
-        rot = (Vector((0, 0, 1)).to_track_quat('Y', 'Z').to_matrix())
-        from mathutils import Matrix
-        # Pad faces the nose: rotate about the vertical (Blender Z) axis so its thin axis points inward-back.
-        m = Matrix.Rotation(-side * pad_tilt, 3, 'Z') @ Matrix.Rotation(math.radians(8) * side, 3, 'Y')
         if metal:
-            ellipsoid(pb, c, (pad_s[2] / 2, pad_s[0] / 2, pad_s[1] / 2), rot=m, segments=16, rings=10)
-            inner_x = side * (lens_cx - rim_edge_at(outline, pad_c[1] + 2 - lens_cy, rim_w * 0.5))
+            m = Matrix.Rotation(-side * pad_tilt, 3, 'Z') @ Matrix.Rotation(math.radians(8) * side, 3, 'Y')
+            ellipsoid(pb, c, (pad_s[0] / 2, pad_s[2] / 2, pad_s[1] / 2), rot=m, segments=16, rings=10)
+            inner_x = side * (lens_cx - rim_edge_at(outline_r_mirror(outline_r, side), pad_c[1] + 2 - lens_cy, width_at(pad_c[1] + 2 - lens_cy) * 0.5))
             arm_from = G(inner_x, pad_c[1] + 2, rim_z)
             arm_to = c + G(side * 0.8, 1.0, 0.6) - G(0, 0, 0)
             arm = smooth_path([arm_from, G(inner_x - side * 1.5, pad_c[1] + 2.5, rim_z - 2.5), arm_to], 4)
             sweep(pb, arm, profile_circle(1.0), up=G(0, 0, 1))
         else:
-            ellipsoid(pb, c, (pad_s[2] / 2 + 0.6, pad_s[0] / 2, pad_s[1] / 2), rot=m, segments=16, rings=10)
+            # Fixed pad: a bump whose inner face is splayed toward the nose flank (rotation about the vertical axis).
+            m = Matrix.Rotation(side * pad_splay, 3, 'Z')
+            ellipsoid(pb, c, (pad_s[0] / 2, pad_s[2] / 2, pad_s[1] / 2), rot=m, segments=16, rings=10)
     pads = finish_mesh('nose_pads', pb, pad_mat)
 
     anchors = [
@@ -429,14 +534,25 @@ def build_frame(d):
     for ob in [front, pads] + lenses + temples + anchors:
         ob.parent = root
 
+    edge_sag = LENS_SPHERE_R - math.sqrt(LENS_SPHERE_R ** 2 - (lw / 2) ** 2)
     report = {
         'frame_id': d['frame_id'],
         'front_width_mm': front.dimensions.x,
         'lens_width_mm': lenses[0].dimensions.x,
+        'lens_height_mm': lenses[0].dimensions.z,
         'triangles': sum(len(o.data.polygons) for o in [front, pads] + lenses + temples),
         'hinge': [hinge_x, hinge_y, hinge_z],
+        'rim_back_mm': round(rim_back, 2),
+        'lens_back_mm': round(lens_z - 0.8 + edge_sag - LENS_CENTER_THICKNESS, 2),
+        'pad_contact': [pad_c[0], pad_c[1], round(pad_c[2] - pad_s[2] / 2, 2)],
+        'rim_outline_mm': rim_outer,
     }
     return root, report
+
+
+def outline_r_mirror(outline_r, side):
+    pts = [(side * x, y) for (x, y) in outline_r]
+    return list(reversed(pts)) if side < 0 else pts
 
 
 def rim_edge_at(outline, y, rim_w):
@@ -529,12 +645,12 @@ def build_all(defs, out_dir, only=None, keep=False, report_path=None):
         rep['glb'] = path
         rep['bytes'] = os.path.getsize(path)
         reports.append(rep)
-        print('[frame_builder]', json.dumps(rep))
+        print('[frame_builder]', json.dumps({k: v for k, v in rep.items() if k != 'rim_outline_mm'}))
         if not keep:
             delete_hierarchy(root)
     if report_path:
         with open(report_path, 'w') as f:
-            json.dump(reports, f, indent=2)
+            json.dump(reports, f, indent=1)
     return reports
 
 
