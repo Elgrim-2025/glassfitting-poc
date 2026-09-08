@@ -51,6 +51,41 @@ export interface AssetAnchor {
   temple_left: Vec3;
   temple_right: Vec3;
   nose_pad_offset: Vec3;
+  /** Lens plane z in GLB coordinates (mm, default 4). */
+  lens_plane_mm?: number;
+  /** Depth from the lens plane to the rim's back face (mm, default 4). */
+  rim_depth_mm?: number;
+  /** Straight arm length from the hinge to where the ear bend starts (mm, default 0.68·temple_mm). */
+  temple_bend_mm?: number;
+  /** Height the arm drops from the bend to its tip (mm, default 28). */
+  temple_drop_mm?: number;
+}
+
+/** Per-region residual penetration after the clearance correction (mm, positive = still penetrating). */
+export interface ClearancePenetration {
+  temple: number;
+  brow: number;
+  cheek: number;
+  nose: number;
+}
+
+export interface ClearanceResult {
+  /** Unfiltered outward temple rotation about each hinge (radians). */
+  splay: { left: number; right: number };
+  /** Forward (+Z) push applied to the nose-landing anchor (mm, 0..maxForwardMm). */
+  forwardMm: number;
+  penetration: ClearancePenetration;
+}
+
+export interface ClearanceConfig {
+  /** Required gap between the arm centreline and the side of the head (mm). */
+  templeMm: number;
+  /** Required gap between the rim's back face and the brow/cheek/nose surface (mm). */
+  rimMm: number;
+  /** How far a nose pad may sink into the skin (mm). */
+  padSinkMm: number;
+  maxForwardMm: number;
+  maxSplayDeg: number;
 }
 
 export interface PdEstimate {
@@ -111,6 +146,9 @@ export interface FittingConfig {
     nosePadDropMm: Record<NosePadType, number>;
     /** Use Kabsch pose estimated from landmarks instead of the MediaPipe matrix. */
     useKabschPose: boolean;
+    /** Pantoscopic tilt about +X (deg); positive tips the lens top toward the camera. */
+    pantoscopicTiltDeg: number;
+    clearance: ClearanceConfig;
   };
   pd: {
     irisDiameterMm: number;
@@ -150,8 +188,10 @@ export interface FitOutput {
   realSizeActive: boolean;
   /** Nose landing anchor in the face-local frame (mm). */
   anchorLocal: Vec3 | null;
-  /** Outward temple rotation about each hinge (radians). */
+  /** Outward temple rotation about each hinge (radians), temporally filtered. */
   templeSplay: { left: number; right: number };
+  /** Clearance solve of this frame (null when no spec is set or the pose is held). */
+  clearance: ClearanceResult | null;
   /** Bridge anchor in camera space (mm) and its projection (normalized). */
   bridgeAnchor: { point: Vec3; screen: { x: number; y: number } } | null;
   pd: PdEstimate;

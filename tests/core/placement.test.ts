@@ -79,6 +79,20 @@ describe('composeGlassesMatrix', () => {
     const bridgeWorld = mTransformPoint(m, [0, 2, -3]);
     mTransformPoint(face, [0, 0, 60]).forEach((v, i) => expect(bridgeWorld[i]).toBeCloseTo(v, 6));
   });
+  it('positive pantoscopic tilt moves the lens top toward +Z (camera) and the temple tips up', () => {
+    const face = poseMatrixMm({ t: [0, 0, -500] });
+    const flat = composeGlassesMatrix(face, [0, 0, 60], { uniform: 1, width: 1 }, null, 0);
+    const tilted = composeGlassesMatrix(face, [0, 0, 60], { uniform: 1, width: 1 }, null, 8);
+    // Origin (bridge) is unaffected by the tilt.
+    mTransformPoint(flat, [0, 0, 0]).forEach((v, i) => expect(mTransformPoint(tilted, [0, 0, 0])[i]).toBeCloseTo(v, 6));
+    const topFlat = mTransformPoint(flat, [0, 20, 0]);
+    const topTilted = mTransformPoint(tilted, [0, 20, 0]);
+    expect(topTilted[2] - topFlat[2]).toBeCloseTo(20 * Math.sin((8 * Math.PI) / 180), 6);
+    expect(topTilted[1]).toBeLessThan(topFlat[1]);
+    const tipFlat = mTransformPoint(flat, [0, 0, -100]);
+    const tipTilted = mTransformPoint(tilted, [0, 0, -100]);
+    expect(tipTilted[1] - tipFlat[1]).toBeCloseTo(100 * Math.sin((8 * Math.PI) / 180), 6);
+  });
 });
 
 describe('estimatePoseKabsch', () => {

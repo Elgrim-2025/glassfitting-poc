@@ -1,12 +1,19 @@
 /**
- * Synthetic face frames for tests and golden vectors: poses the canonical model,
- * projects it through the camera model and emits MediaPipe-shaped FrameInput.
+ * Synthetic face frames for tests and golden vectors: poses the canonical model (or a
+ * deformed copy of it), projects it through the camera model and emits
+ * MediaPipe-shaped FrameInput.
+ *
+ * With `vertices` (a deformed face) the emitted matrix is not the true pose but the
+ * rigid Kabsch fit of the canonical model onto the posed vertices — what MediaPipe
+ * reports for a real face — so the depth mismatch of the real pipeline (screen-exact
+ * xy, canonical depth) is reproduced.
  */
-import { CANONICAL_VERTICES_MM } from '../../src/core/fitting/canonical';
+import { CANONICAL_VERTEX_COUNT, CANONICAL_VERTICES_MM } from '../../src/core/fitting/canonical';
 import { CameraModel } from '../../src/core/fitting/camera';
+import { absoluteOrientation } from '../../src/core/math/kabsch';
 import { mCompose, mTransformPoints, type Mat4 } from '../../src/core/math/mat4';
 import { qFromAxisAngle, qMultiply, type Quat } from '../../src/core/math/quat';
-import { LM } from '../../src/core/landmarks';
+import { KABSCH_WEIGHTS, LM } from '../../src/core/landmarks';
 import type { FrameInput, Landmark } from '../../src/core/types';
 
 export interface SyntheticPose {
@@ -27,6 +34,12 @@ export interface SyntheticOptions {
   pdMm?: number;
   blink?: number;
   rng?: () => number;
+  /**
+   * Face-local vertices (468 × 3, mm) replacing the canonical model. The frame's matrix
+   * becomes the weighted rigid Kabsch fit (scale 1) of the canonical model onto the posed
+   * vertices, as a tracker would estimate it.
+   */
+  vertices?: Float32Array;
 }
 
 const d2r = Math.PI / 180;
@@ -38,9 +51,14 @@ export function poseQuat(p: SyntheticPose): Quat {
   return qMultiply(qy, qMultiply(qx, qz));
 }
 
-/** Face matrix in mm for a pose (rotation + translation, unit scale). */
+/** True face matrix in mm for a pose (rotation + translation, unit scale). */
 export function poseMatrixMm(p: SyntheticPose): Mat4 {
   return mCompose(p.t, poseQuat(p), [1, 1, 1]);
+}
+
+/** Rigid (scale 1) weighted Kabsch fit of the canonical model onto posed camera-space points. */
+export function fitCanonicalPose(posedMm: ArrayLike<number>): Mat4 {
+  return absoluteOrientation(CANONICAL_VERTICES_MM, posedMm, KABSCH_WEIGHTS, false).matrix;
 }
 
 /** Deterministic LCG uniform sampler. */
@@ -65,10 +83,12 @@ export function makeSyntheticFrame(pose: SyntheticPose, timestampMs: number, opt
   const pdMm = opts.pdMm ?? 63;
   const ws = pose.widthScale ?? 1;
 
-  const faceMm = poseMatrixMm(pose);
-  const local = new Float32Array(CANONICAL_VERTICES_MM);
-  for (let i = 0; i < 468; i++) local[i * 3] *= ws;
-  const posed = mTransformPoints(faceMm, local);
+  const truePose = poseMatrixMm(pose);
+  const local = new Float32Array(opts.vertices ?? CANONICAL_VERTICES_MM);
+  for (let i = 0; i < CANONICAL_VERTEX_COUNT; i++) local[i * 3] *= ws;
+  const posed = mTransformPoints(truePose, local);
+  // Deformed faces report the tracker-style fitted matrix; the canonical face reports its true pose.
+  const faceMm = opts.vertices ? fitCanonicalPose(posed) : truePose;
   const faceDepth = -faceMm[14];
   const widthMm = cam.widthAtDepth(faceDepth);
 
@@ -79,7 +99,7 @@ export function makeSyntheticFrame(pose: SyntheticPose, timestampMs: number, opt
     const ny = noisePx ? (gauss(rng) * noisePx) / cam.imageHeight : 0;
     landmarks.push({ x: n.x + nx, y: n.y + ny, z: (faceMm[14] - z) / widthMm });
   };
-  for (let i = 0; i < 468; i++) push(posed[i * 3], posed[i * 3 + 1], posed[i * 3 + 2]);
+  for (let i = 0; i < CANONICAL_VERTEX_COUNT; i++) push(posed[i * 3], posed[i * 3 + 1], posed[i * 3 + 2]);
 
   // Irises: on the eye plane (local frame) at ±PD/2, with the requested diameter, then posed.
   const eyeCenterLocal = (outer: number, inner: number, sign: number): [number, number, number] => {
@@ -100,7 +120,7 @@ export function makeSyntheticFrame(pose: SyntheticPose, timestampMs: number, opt
       [c[0] - r, c[1], c[2]],
       [c[0], c[1] - r, c[2]],
     ];
-    const p = mTransformPoints(faceMm, new Float32Array(pts.flat()));
+    const p = mTransformPoints(truePose, new Float32Array(pts.flat()));
     for (let i = 0; i < 5; i++) push(p[i * 3], p[i * 3 + 1], p[i * 3 + 2]);
   }
 

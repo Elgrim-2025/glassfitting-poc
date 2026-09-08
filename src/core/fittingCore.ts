@@ -12,14 +12,14 @@ import { isPlausibleFaceMatrix, mpMatrixToMm } from './fitting/mediapipeMatrix';
 import { toMetricLandmarks } from './fitting/metricLandmarks';
 import { solveNoseLanding } from './fitting/noseLanding';
 import { solveWidthScale } from './fitting/scaleSolver';
-import { solveTempleSplay, type HingeGeometry } from './fitting/templeSplay';
+import { solveClearance, type HingeGeometry } from './fitting/clearance';
 import { LM, TOTAL_LANDMARK_COUNT } from './landmarks';
-import { mTransformPoint, type Mat4 } from './math/mat4';
+import { mInvert, mTransformPoint, mTransformPoints, type Mat4 } from './math/mat4';
 import type { Vec3 } from './math/vec3';
 import { IDLE_ESTIMATE, PdEstimator } from './pd/pdEstimator';
 import { anglesFromMatrix } from './tracking/angles';
 import { TrackingStateMachine } from './tracking/stateMachine';
-import type { Angles, AssetAnchor, FitOutput, FittingConfig, FrameInput, FrameSpec } from './types';
+import type { Angles, AssetAnchor, ClearanceResult, FitOutput, FittingConfig, FrameInput, FrameSpec } from './types';
 
 export const REAL_SIZE_SCALE_MIN = 0.7;
 export const REAL_SIZE_SCALE_MAX = 1.4;
@@ -139,6 +139,7 @@ export class FittingCore {
     let realSizeActive = false;
     let anchorLocal: Vec3 | null = null;
     let templeSplay = { left: 0, right: 0 };
+    let clearance: ClearanceResult | null = null;
 
     if (detected && !st.holdPose) {
       faceMatrix = this.poseFilter.filter(rawFace!, frame.timestampMs, st.filterStrength);
@@ -154,14 +155,23 @@ export class FittingCore {
         widthScale = cfg.placement.widthScaleEnabled ? smoothWidth : 1;
       }
 
+      // Nose landing → clearance (forward push on the anchor, unfiltered splay) → matrix with tilt → filtered splay.
       anchorLocal = solveNoseLanding(metric!, rawFace!, this.spec, cfg.placement).anchor;
-      glassesMatrix = composeGlassesMatrix(faceMatrix, anchorLocal, { uniform: uniformScale, width: widthScale }, this.asset);
+      const scale = { uniform: uniformScale, width: widthScale };
       const hinge = this.hingeGeometry();
-      if (hinge) {
-        const scaledHinge = { ...hinge, halfWidth: hinge.halfWidth * widthScale * uniformScale };
-        const s = solveTempleSplay(metric!, rawFace!, anchorLocal, scaledHinge);
-        templeSplay = { left: this.splayL.filter(s.left, frame.timestampMs), right: this.splayR.filter(s.right, frame.timestampMs) };
+      if (this.spec && hinge) {
+        const local = mTransformPoints(mInvert(rawFace!), metric!);
+        clearance = solveClearance({
+          verticesLocal: local, anchorLocal, spec: this.spec, hinge, asset: this.asset, scale,
+          tiltDeg: cfg.placement.pantoscopicTiltDeg, cfg: cfg.placement.clearance,
+        });
+        anchorLocal = [anchorLocal[0], anchorLocal[1], anchorLocal[2] + clearance.forwardMm];
+        templeSplay = {
+          left: this.splayL.filter(clearance.splay.left, frame.timestampMs),
+          right: this.splayR.filter(clearance.splay.right, frame.timestampMs),
+        };
       }
+      glassesMatrix = composeGlassesMatrix(faceMatrix, anchorLocal, scale, this.asset, cfg.placement.pantoscopicTiltDeg);
     } else if (st.holdPose && this.last) {
       faceMatrix = this.last.faceMatrix;
       glassesMatrix = this.last.glassesMatrix;
@@ -172,6 +182,7 @@ export class FittingCore {
       realSizeActive = this.last.realSizeActive;
       anchorLocal = this.last.anchorLocal;
       templeSplay = this.last.templeSplay;
+      clearance = this.last.clearance;
     } else {
       this.poseFilter.reset();
       this.widthFilter.reset();
@@ -200,6 +211,7 @@ export class FittingCore {
       realSizeActive,
       anchorLocal,
       templeSplay,
+      clearance,
       bridgeAnchor,
       pd,
       confidence,

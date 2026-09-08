@@ -26,6 +26,8 @@ export const DEFAULT_CONFIG: FittingConfig = {
     bridgeClearanceMm: 1.0,
     nosePadDropMm: { fixed: 0, adjustable: -3 },
     useKabschPose: false,
+    pantoscopicTiltDeg: 8,
+    clearance: { templeMm: 2.5, rimMm: 1.5, padSinkMm: 1.0, maxForwardMm: 12, maxSplayDeg: 15 },
   },
   pd: {
     irisDiameterMm: 11.7,
