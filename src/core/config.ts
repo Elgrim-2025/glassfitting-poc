@@ -25,7 +25,7 @@ export const DEFAULT_CONFIG: FittingConfig = {
     widthScaleMax: 1.25,
     bridgeClearanceMm: 1.0,
     nosePadDropMm: { fixed: 0, adjustable: -5 },
-    useKabschPose: false,
+    useKabschPose: true,
     depthSource: 'hybrid',
     pantoscopicTiltDeg: 8,
     clearance: { templeMm: 2.5, rimMm: 1.0, padSinkMm: 1.0, noseSinkMm: 2.0, maxForwardMm: 15, maxSplayDeg: 15, vertexMinMm: 10, vertexMaxMm: 23 },

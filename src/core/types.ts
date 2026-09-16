@@ -170,7 +170,10 @@ export interface FittingConfig {
     bridgeClearanceMm: number;
     /** Vertical landing offset presets by nose-pad type (mm, negative = lower). */
     nosePadDropMm: Record<NosePadType, number>;
-    /** Use Kabsch pose estimated from landmarks instead of the MediaPipe matrix. */
+    /**
+     * Pose source. true (default) = Kabsch fit of the canonical model to the landmarks (eyes, nose
+     * and temples weighted); false = MediaPipe's facialTransformationMatrix (option).
+     */
     useKabschPose: boolean;
     /**
      * Depth of the metric face points: 'canonical' = the posed canonical model everywhere (stable,

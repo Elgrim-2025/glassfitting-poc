@@ -1,5 +1,5 @@
 /**
- * Alternative pose path (spec §3.2 "대안 경로"): fit the canonical model to the
+ * Default pose path (spec §3.2 "대안 경로", promoted to default): fit the canonical model to the
  * reconstructed metric landmarks with Horn's method. Returns a unit-scale pose
  * matrix plus the fitted scale and residual.
  */

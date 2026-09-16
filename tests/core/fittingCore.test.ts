@@ -46,12 +46,21 @@ describe('FittingCore', () => {
     expect(out.angles!.yaw).toBeCloseTo(60, 3);
   });
 
-  it('supports the Kabsch pose path without a matrix', () => {
-    const core = new FittingCore({ placement: { useKabschPose: true } });
+  it('uses the Kabsch pose by default, even without a matrix', () => {
+    const core = new FittingCore();
     const f = makeSyntheticFrame({ t: [0, 0, -500], yawDeg: 15 }, 0);
     const out = core.process({ ...f, matrix: null });
     expect(out.detected).toBe(true);
     expect(out.angles!.yaw).toBeCloseTo(15, 0);
+  });
+
+  it('keeps the MediaPipe matrix path as an option', () => {
+    const core = new FittingCore({ placement: { useKabschPose: false } });
+    const f = makeSyntheticFrame({ t: [0, 0, -500], yawDeg: 15 }, 0);
+    expect(core.process({ ...f, matrix: null }).detected).toBe(false);
+    const out = core.process(f);
+    expect(out.detected).toBe(true);
+    expect(out.angles!.yaw).toBeCloseTo(15, 3);
   });
 
   it('applies real-size mode once the PD estimate is ready', () => {
