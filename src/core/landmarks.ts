@@ -49,7 +49,7 @@ export const TOTAL_LANDMARK_COUNT = 478;
 export const EYE_L_RING = [33, 133, 159, 145] as const;
 export const EYE_R_RING = [362, 263, 386, 374] as const;
 
-/** Weights for the Kabsch fallback: eyes, nose and temples dominate; lips/jaw are down-weighted. */
+/** Weights for the Kabsch pose (default path): eyes, nose and temples dominate; lips/jaw are down-weighted. */
 export const KABSCH_WEIGHTS: Float32Array = (() => {
   const w = new Float32Array(FACE_POINT_COUNT).fill(0.3);
   const strong = [

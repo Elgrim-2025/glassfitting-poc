@@ -230,7 +230,7 @@ export class Panel {
     this.checkbox(s3, 'realSize', '실치수 모드 (PD 준비 시)', cfg.placement.realSizeMode, (v) => cb.onConfigPatch({ placement: { realSizeMode: v } }));
     this.slider(s3, 'clearance', '브릿지 클리어런스 (mm)', -3, 6, 0.5, cfg.placement.bridgeClearanceMm, (v) => cb.onConfigPatch({ placement: { bridgeClearanceMm: v } }));
     this.slider(s3, 'tilt', '팬토스코픽 틸트 (°)', -5, 15, 0.5, cfg.placement.pantoscopicTiltDeg, (v) => cb.onConfigPatch({ placement: { pantoscopicTiltDeg: v } }));
-    this.checkbox(s3, 'kabsch', '대안 경로: Kabsch 포즈', cfg.placement.useKabschPose, (v) => cb.onConfigPatch({ placement: { useKabschPose: v } }));
+    this.checkbox(s3, 'kabsch', 'Kabsch 포즈 (끄면 MediaPipe 행렬)', cfg.placement.useKabschPose, (v) => cb.onConfigPatch({ placement: { useKabschPose: v } }));
     const depth = this.select(s3, '얼굴 깊이 출처', (v) => cb.onConfigPatch({ placement: { depthSource: v as FittingConfig['placement']['depthSource'] } }));
     depth.add(new Option('하이브리드 (정규 모델 + 코만 랜드마크 z)', 'hybrid'));
     depth.add(new Option('정규 모델 깊이', 'canonical'));

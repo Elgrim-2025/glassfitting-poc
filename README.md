@@ -31,7 +31,7 @@ src/core/            공용 코어(순수 TS, DOM/Three 의존 없음) — 안�
   fittingCore.ts       FittingCore.process(FrameInput) → FitOutput
   fitting/             camera(63° 핀홀), mediapipeMatrix(cm→mm), metricLandmarks(역투영·깊이 출처: 정규/랜드마크/하이브리드), scaleSolver,
                        faceSurface(영역 삼각형 높이장), noseLanding(코 패드 접촉 착지), clearance(다리 벌림·전방 보정·정점 클램프·관통 잔여),
-                       anchorSolver(틸트 포함), kabschPose(대안 경로), canonical(생성 데이터)
+                       anchorSolver(틸트 포함), kabschPose(기본 포즈 · MediaPipe 행렬은 옵션), canonical(생성 데이터)
   filters/             One-Euro(scalar/vec3/quat), PoseFilter(T·Q·S 분해)
   tracking/            angles(yaw/pitch/roll), stateMachine(Tracking/Degraded/Lost)
   pd/                  PdEstimator(홍채 스케일·게이팅·통계·근용→원용)
